@@ -17,8 +17,12 @@ local MOD_PREFIX = "mods/spell_bracket_visualizer/"
 
 local M = { MOD_ROOT = MOD_ROOT }
 
+-- Captured now: read_file also runs while the engine has swapped the global
+-- table (see gun_ref_dofile), when the global `io` is not visible.
+local io_open = io.open
+
 local function read_file(path)
-	local fh = io.open(path, "rb")
+	local fh = io_open(path, "rb")
 	if not fh then return nil end
 	local text = fh:read("*a")
 	fh:close()
@@ -37,9 +41,21 @@ function M.install_mod_loader()
 	end
 end
 
---- `read_source` backed by .gun_ref/, mirroring the game's data/ layout.
-function M.gun_ref_reader()
-	return function(path) return read_file(MOD_ROOT .. "/.gun_ref/" .. path) end
+--- A stand-in for Noita's `dofile`: run a file from .gun_ref/ (mirroring the
+-- game's data/ layout) with the CURRENT global table as its environment.
+--
+-- The engine swaps the global table while it runs (game_env.lua), so this
+-- function must not use any global at call time: everything it needs is
+-- captured in locals here.
+function M.gun_ref_dofile()
+	local load, assert, error, tostring, G = load, assert, error, tostring, _G
+	local read = read_file
+	return function(path)
+		local source = read(MOD_ROOT .. "/.gun_ref/" .. path)
+		if source == nil or source == "" then error("game file not found: " .. tostring(path), 0) end
+		local chunk = assert(load(source, "@" .. path, "t", G))
+		return chunk()
+	end
 end
 
 --- True when the game's cast code has been extracted locally.
@@ -54,7 +70,7 @@ function M.new_engine(world)
 			.. "Run:  python3 tools/extract_gun.py            (reads your data.wak)\n", 0)
 	end
 	local engine_module = dofile_once(MOD_PREFIX .. "files/engine/engine.lua")
-	local engine, err = engine_module.new(M.gun_ref_reader(), world)
+	local engine, err = engine_module.new(M.gun_ref_dofile(), world)
 	if not engine then error("engine failed to start: " .. tostring(err), 0) end
 	return engine
 end

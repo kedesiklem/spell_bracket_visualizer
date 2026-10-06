@@ -62,11 +62,11 @@ shown as a re-cast child (`again: ... xN`), not as part of a bracket.
 | File | Responsibility |
 | --- | --- |
 | `engine.lua` | The only entry point: wires the four pieces below and exposes `run`, `knows`, `name_key`, `action_type`. |
-| `game_env.lua` | The sandbox: compiles `gun.lua` and every spell into a private environment, with a whitelist of pure Lua functions and no path to the real global table. |
+| `game_env.lua` | The sandbox. Noita exposes no `load`/`loadstring`, so game files are run by `dofile` with the global table SWAPPED for the duration of each call: real globals stashed, `_G` filled with a whitelist of pure functions, the engine stand-ins and whatever `gun.lua` defined, then everything restored (even after an error). The cast code never sees a real engine function. |
 | `engine_stubs.lua` | Stand-ins for the Noita API that spell bodies call: no-ops, a fake player/world for the reads that steer drawing, a deterministic RNG, and a report of everything that had to be guessed. |
 | `cast_tracer.lua` | Hooks around `gun.lua` that record each cast as a tree of nodes (spans of removed slots, wraps, cleared decks, uncertainty). Pure observation; it changes nothing. |
 | `wand_runner.lua` | The protocol for operating `gun.lua` from outside (load deck, start shot, play always-casts, draw, reload), repeated until the wand recharges. |
-| `lua_compat.lua` | The two places LuaJIT (the game) and Lua 5.3+ (offline tools) differ. |
+| `lua_compat.lua` | The one place LuaJIT (the game) and Lua 5.3+ (offline tools) differ: `unpack`. |
 
 ### Presentation-independent logic (`files/`)
 
@@ -89,7 +89,7 @@ shown as a re-cast child (`again: ... xN`), not as part of a bracket.
 | --- | --- |
 | `test_support.lua` | Loader and engine factory shared by every offline test. |
 | `test_wand_structure.lua` | Expression-shape tests against the real engine. |
-| `test_lua_compat.lua`, `test_slot_delims.lua`, `test_slot_marks.lua`, `test_panel_rows.lua`, `test_font_compat.lua` | Bracket planner, mark planner, panel row clamp, font-safety layout. |
+| `test_sandbox_swap.lua`, `test_slot_delims.lua`, `test_slot_marks.lua`, `test_panel_rows.lua`, `test_font_compat.lua` | Bracket planner, mark planner, panel row clamp, font-safety layout. |
 | `preview_wand.lua` | Print any wand's brackets and expression tree in the terminal. |
 | `extract_gun.py` | Copy `gun.lua` and friends out of the player's `data.wak` into the git-ignored `.gun_ref/`. |
 
@@ -114,6 +114,8 @@ texlua tools/test_panel_rows.lua
 
 ## Not verified outside the game
 
-The offline tests cannot exercise `ModTextFileGetContent` (how the mod reads
-`gun.lua` in game), the `setfenv` path of `lua_compat.lua`, or the engine's
-per-frame cost on a large inventory. These need a play-test.
+The offline tests cannot exercise the game's own `dofile` (how the mod loads
+`gun.lua` and whether it applies other mods' `ModLuaFileAppend` spells), the
+exact way Noita's `dofile` picks the global table as the chunk environment (the
+sandbox swap relies on it), or the engine's per-frame cost on a large inventory.
+These need a play-test.

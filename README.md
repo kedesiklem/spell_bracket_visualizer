@@ -127,7 +127,7 @@ files/engine/                   # runs the game's own gun.lua in a sandbox
   engine_stubs.lua              #   fake Noita API / world, uncertainty report
   cast_tracer.lua               #   records each cast as a tree of nodes
   wand_runner.lua               #   the protocol for firing a wand
-  lua_compat.lua                #   LuaJIT / Lua 5.3 differences
+  lua_compat.lua                #   LuaJIT / Lua 5.3 differences (unpack)
 files/wand_structure.lua        # re-shapes the recording into the expression tree
 files/wand_sim_cache.lua        # one simulation per wand change, not per frame
 files/slot_marks.lua            # which cards get an underline / strike-through (pure)
