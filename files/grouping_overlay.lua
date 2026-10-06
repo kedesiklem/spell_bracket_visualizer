@@ -320,6 +320,8 @@ WORDS.full = {
 		end
 		return out
 	end,
+	-- how often a card ran / was applied
+	times = function(n) return " x" .. n end,
 	divisor = function(n) return "Divide by " .. n end,
 	dangling = "  (no projectile)",
 	divides_nothing = "  (nothing to repeat)",
@@ -351,10 +353,13 @@ WORDS.compact = {
 	name = compact_name,
 	recast = function(label, count, sources)
 		local out = "* " .. label
-		if count and count > 1 then out = out .. " x" .. count end
+		if count and count > 1 then out = out .. " \195\151" .. count end
 		if sources and #sources > 0 then out = out .. " @" .. table.concat(sources, ",") end
 		return out
 	end,
+	-- U+00D7 (UTF-8 bytes C3 97), not "x": in compact text "x2" already means
+	-- a two-card multicast, and a run count must not read as one.
+	times = function(n) return " \195\151" .. n end,
 	divisor = function(n) return "D" .. n end,
 	dangling = " (none)",
 	divides_nothing = " (none)",
@@ -407,7 +412,7 @@ local function divided_names(node, rows, words)
 			names[#names + 1] = words.divisor(node.divisor or 1)
 		else
 			local name = dyn_name(id, rows, node.uncertain_ids, words.name)
-			names[#names + 1] = count[id] > 1 and (name .. " x" .. count[id]) or name
+			names[#names + 1] = count[id] > 1 and (name .. words.times(count[id])) or name
 		end
 	end
 	return names
@@ -425,7 +430,7 @@ local function modifier_names(node, rows, words)
 			j = j + 1
 		end
 		local name = dyn_name(mods[i], rows, node.uncertain_ids, words.name)
-		names[#names + 1] = count > 1 and (name .. " x" .. count) or name
+		names[#names + 1] = count > 1 and (name .. words.times(count)) or name
 		i = j
 	end
 	return names
@@ -471,7 +476,7 @@ local function walk(rows, node, ancestor_colors, depth, words)
 	if node.runs and node.divisor and not node.silent_runs then
 		-- already said by the "Divide by N" entry above
 	elseif node.runs then
-		label = label .. "  x" .. node.runs
+		label = label .. " " .. words.times(node.runs)
 		if node.silent_runs then label = label .. words.silent(node.silent_runs) end
 	end
 	-- A card the engine re-ran (a Greek letter's copy, Alpha's self-copy, ...) is

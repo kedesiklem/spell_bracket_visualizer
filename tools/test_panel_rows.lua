@@ -628,7 +628,7 @@ do
 	eq("compact: Divide By becomes D<n>, folded and counted",
 		labels({ kind = "leaf", id = "LIGHT_BULLET", atype = "PROJECTILE",
 			modifiers = { "DIVIDE_10", "DIVIDE_10", "DIVIDE_4" }, runs = 400 })[1],
-		"[D10 x2, D4] Light Bullet  x400")
+		"[D10 ×2, D4] Light Bullet  ×400")
 	-- A chain with Damage Plus cards between the Divide By cards: one D<product>,
 	-- and the other modifiers counted by name over the whole chain.
 	local chain = { kind = "leaf", id = "LIGHT_BULLET", atype = "PROJECTILE",
@@ -637,7 +637,7 @@ do
 		divider_at = { [1] = true, [2] = true, [3] = true, [6] = true },
 		link_runs = { [4] = 400, [5] = 400, [7] = 800 } }
 	eq("compact: a Divide By chain collapses to one D<product>",
-		labels(chain)[1], "[D800, Damage x1600] Light Bullet")
+		labels(chain)[1], "[D800, Damage ×1600] Light Bullet")
 	eq("full: the same chain reads Divide by <product>",
 		(function()
 			local sim = { casts = { { nodes = { chain }, wrapped = false, mana = 0 } }, wrapped = false }
@@ -668,7 +668,7 @@ do
 		{ kind = "leaf", id = "LIGHT_BULLET", atype = "PROJECTILE", recast = true,
 			count = 2, sources = { 1, 3 }, modifiers = {}, children = {} } } })
 	eq("compact: a re-cast is a star, with its sources after an @",
-		copy_rows[2], "* Light Bullet x2 @1,3")
+		copy_rows[2], "* Light Bullet ×2 @1,3")
 
 	local failed = labels({ kind = "leaf", id = "ADD_TRIGGER", atype = "OTHER",
 		trigger_failed = "no_target",
