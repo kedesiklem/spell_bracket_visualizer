@@ -89,7 +89,7 @@ shown as a re-cast child (`again: ... xN`), not as part of a bracket.
 | --- | --- |
 | `test_support.lua` | Loader and engine factory shared by every offline test. |
 | `test_wand_structure.lua` | Expression-shape tests against the real engine. |
-| `test_slot_delims.lua`, `test_slot_marks.lua`, `test_panel_rows.lua`, `test_font_compat.lua` | Bracket planner, mark planner, panel row clamp, font-safety layout. |
+| `test_lua_compat.lua`, `test_slot_delims.lua`, `test_slot_marks.lua`, `test_panel_rows.lua`, `test_font_compat.lua` | Bracket planner, mark planner, panel row clamp, font-safety layout. |
 | `preview_wand.lua` | Print any wand's brackets and expression tree in the terminal. |
 | `extract_gun.py` | Copy `gun.lua` and friends out of the player's `data.wak` into the git-ignored `.gun_ref/`. |
 
