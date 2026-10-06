@@ -693,6 +693,15 @@ local BOX = {
 	-- LENGTH adds ~0.17u/px (the two h7 wands differ ~1u) -- left out for now,
 	-- add a length term + index if a wand visibly annoys (SPRITE_OVERRIDES is the
 	-- escape hatch). Calibrated on h 7-15.
+	-- FLOOR.  The fit above is calibrated on h 7..15, and the box has to hold the
+	-- "Shuffle / Spells per cast" header whatever the sprite does, so a thinner
+	-- sprite cannot shrink it below what the thinnest calibrated wand gets (the
+	-- upstream notes call that one "the floor wand", box_h ~35.6).  Extrapolating
+	-- the line below h7 predicted a box up to 2.5u (h5) or 5u (h3) too short and
+	-- put every bracket on such a wand too high -- wand_0484 is h5.  INFERRED
+	-- from that note, not measured: if a thin wand still sits wrong, measure it
+	-- with the debug middle-click tool and pin it in SPRITE_OVERRIDES.
+	min_h   = 7,     -- px: sprite thickness below which the box stops shrinking
 	row_a   = 11.3,  -- units: slot-row offset (box top -> row top) at h=0 (intercept)
 	row_b   = 1.25,  -- units: row-offset growth per px of sprite thickness h
 	below_c = 15.6,  -- units: box bottom sits this far below the row top (measured)
@@ -1281,7 +1290,8 @@ local function collect_wand_boxes(gui, refw, per_row, ignore_depleted)
 		-- Extra rows of a multi-row wand (per_row, frozen feature) stack DOWN.
 		-- A per-sprite override wins over the model (SPRITE_OVERRIDES).
 		local ov = wd.sprite and SPRITE_OVERRIDES[wd.sprite]
-		local row_offset = (ov and ov.row_top) or (BOX.row_a + BOX.row_b * wd.h)
+		local row_offset = (ov and ov.row_top)
+			or (BOX.row_a + BOX.row_b * math.max(wd.h, BOX.min_h))
 		wd.box_h = ((ov and ov.box_h) or (row_offset + BOX.below_c))
 			+ (wd.nrows - 1) * BOX.row_step
 		wd.top = box_top

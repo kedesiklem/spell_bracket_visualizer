@@ -37,6 +37,8 @@ LUA = os.path.join(os.path.dirname(__file__), "..", "files", "grouping_overlay.l
 # Derived as box_h - below_c(15.6). The h7 pair spans 35.0/36.2u box_h (length
 # adds ~0.17u/px, not modeled), so the h7 anchor uses the midpoint with a looser tol.
 ROW_ANCHORS = [
+    # no measurement below h7: thin wands (wand_0484 is h5) are held at the h7 floor
+    ("h5 wand (wand_0484), floored", 5, 20.00, 0.8),
     ("h7 wand (wand_0492/0511)", 7,  20.00, 0.8),
     ("h9 wand (wand_0531)",      9,  22.60, 0.6),
     ("h15 wand (wand_0860)",     15, 30.00, 0.6),
@@ -44,6 +46,7 @@ ROW_ANCHORS = [
 # (label, thickness h, measured box-top -> box-bottom [box height, u], tol). Read
 # from box-bottom borders + "Shuffle"-row stacking checks. h7 midpoint (35.0/36.2).
 BOX_H_ANCHORS = [
+    ("h5 wand (wand_0484), floored", 5, 35.60, 0.8),
     ("h7 wand (wand_0492/0511)", 7,  35.60, 0.8),
     ("h9 wand (wand_0531)",      9,  38.20, 0.6),
     ("h15 wand (wand_0860)",     15, 45.60, 0.6),
@@ -99,10 +102,11 @@ def main():
 
     row_a   = grab(src, "row_a")
     row_b   = grab(src, "row_b")
+    min_h   = grab(src, "min_h")
     below_c = grab(src, "below_c")
 
     def row_top(h):
-        return row_a + row_b * h
+        return row_a + row_b * max(h, min_h)   # the floor: thin sprites do not shrink the box
 
     def box_h(h):
         return row_top(h) + below_c
