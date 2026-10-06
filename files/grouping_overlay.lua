@@ -1023,8 +1023,10 @@ local function collect_wand_boxes(gui, refw, per_row, ignore_depleted)
 			wd.sim = { casts = {}, error = engine_error or "engine not ready" }
 		end
 		wd.uncertain_ids = wand_structure.uncertain_ids(wd.sim)
-		-- A wand is "uncertain" when anything on it depended on a guess.
-		wd.uncertain = #wd.uncertain_ids > 0 or wd.sim.uncertain ~= nil
+		-- A wand is "uncertain" when a CARD on it depended on a guess.  A guess made
+		-- by the cast machinery outside any card (sim.uncertain, shown in the debug
+		-- box) says nothing about this wand's structure, so it does not count.
+		wd.uncertain = #wd.uncertain_ids > 0
 
 		-- displayed slot rows: capacity wraps every per_row slots (fall back
 		-- to the highest occupied slot if the capacity read failed). per_row is
