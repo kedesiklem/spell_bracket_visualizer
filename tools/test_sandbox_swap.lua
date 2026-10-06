@@ -31,8 +31,11 @@ local function same_globals(a, b)
 end
 
 -- A real "engine function" that must never be reached from inside the sandbox.
-local reached = false
-SECRET_ENGINE_CALL = function() reached = true end
+-- a C function, like the real engine API: if the sandbox let it through, the
+-- missing argument would make it raise
+SECRET_ENGINE_CALL = error
+-- a CamelCase function written in Lua is code, not the engine: it must keep working
+LUA_HELPER = function() return "helper ran" end
 
 -- a lowercase helper stands in for Noita's own `dofile` internals (e.g. __loaded)
 __internal_helper = function() return "still here" end
@@ -51,12 +54,14 @@ local seen = game.run(function()
 		helper = rawget(_G, "__internal_helper")(),
 		actions = #rawget(_G, "actions"),
 	}
-	SECRET_ENGINE_CALL()
+	out.guarded = pcall(SECRET_ENGINE_CALL)
+	out.lua_helper = LUA_HELPER()
 	return out
 end)
 eq("inside: the sandbox holds the game's spells", seen.actions > 100, true)
 eq("inside: lowercase internals (what dofile needs) stay available", seen.helper, "still here")
-eq("inside: an engine call does NOT reach the real function", reached, false)
+eq("inside: an engine call does NOT reach the real function", seen.guarded, true)
+eq("inside: a CamelCase function written in Lua keeps working", seen.lua_helper, "helper ran")
 eq("inside: ...it is counted as unknown instead", game.report.unknown.SECRET_ENGINE_CALL, 1)
 eq("after a run the real globals are back exactly",
 	(same_globals(before, snapshot())), true)

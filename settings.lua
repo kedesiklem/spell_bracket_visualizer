@@ -19,14 +19,6 @@ mod_settings = {
 		scope = MOD_SETTING_SCOPE_RUNTIME,
 	},
 	{
-		id = "long_labels",
-		ui_name = "Wand Structure Panel: Long Rows",
-		ui_description = "What happens to a row wider than the panel.\nTooltip (default): it is cut with '...'; hover it to read the\nfull text, click it to open it in place (click again to close).\nWrap: every long row continues on the next line.\nTruncate: just cut with '...'.\nA structure taller than the screen scrolls with PageUp / PageDown.",
-		value_default = "tooltip",
-		values = { { "tooltip", "Tooltip + click (default)" }, { "wrap", "Wrap" }, { "truncate", "Truncate with ..." } },
-		scope = MOD_SETTING_SCOPE_RUNTIME,
-	},
-	{
 		id = "show_slot_brackets",
 		ui_name = "Slot Brackets",
 		ui_description = "Rainbow nesting brackets on the spell cards in the wand UI,\nlike nested code brackets: each group's span, and wand\nwrapping in orange.",

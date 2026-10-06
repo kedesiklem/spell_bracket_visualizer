@@ -419,15 +419,6 @@ do
 	eq("wrap: a short label is left alone", T.wrap_label(nil, "short", 1.0, 120)[1], "short")
 
 	local anchor = { boxes = { { top = 48, right = 400 } }, sel = 1 }
-	drawn = { texts = {} }
-	T.draw_panel(nil, { { bars = {}, label = long, color = GREY } }, TITLE, 640, 360,
-		anchor, 1.0, { wrap = true })
-	local all = {}
-	for _, t in ipairs(drawn.texts) do
-		if t.text ~= TITLE and t.text ~= "|" then all[#all + 1] = (t.text:gsub("^%s+", "")) end
-	end
-	eq("panel wrap: nothing truncated with '...'", table.concat(all, " "):find("...", 1, true), nil)
-	eq("panel wrap: full text readable", table.concat(all, " "), long)
 
 	local function page(scroll)
 		local view = { scroll = scroll }

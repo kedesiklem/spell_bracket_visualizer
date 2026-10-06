@@ -18,7 +18,7 @@
 --   environment.  It has to run in the global table, as WandDBG does.  So for
 --   the duration of each call the global table is OVERLAID, then put back:
 --
---     activate    remember every real global; replace each CamelCase function
+--     activate    remember every real global; replace each CamelCase C function
 --                 (the engine API: EntityLoad, GamePrint, ...) with a counting
 --                 no-op; apply the sandbox's own contents (the engine stand-ins
 --                 and everything gun.lua defined)
@@ -68,10 +68,26 @@ local function copy_table(source)
 	return out
 end
 
---- Engine API names are CamelCase; a Lua function whose name starts with a capital
--- letter is therefore treated as one.
+-- Only a C function can touch the engine; a function written in Lua is code (the
+-- game's own gunaction_generated.lua helpers, another mod's utilities) that has
+-- to keep working -- whatever engine call it makes is neutralised on its own.
+-- `debug` may not exist in Noita, in which case the ConfigGun* family (Lua
+-- helpers that gun.lua cannot run without) is spared by name instead.
+local get_info = type(debug) == "table" and debug.getinfo or nil
+
+local function is_lua_function(key, value)
+	if get_info then
+		local ok, info = pcall(get_info, value, "S")
+		if ok and info then return info.what ~= "C" end
+	end
+	return key:find("^ConfigGun") ~= nil
+end
+
+--- Engine API names are CamelCase: a C function whose name starts with a capital
+-- letter is treated as the engine's.
 local function is_engine_function(key, value)
-	return type(key) == "string" and type(value) == "function" and key:find("^%u") ~= nil
+	return type(key) == "string" and type(value) == "function"
+		and key:find("^%u") ~= nil and not is_lua_function(key, value)
 end
 
 --- The overlay itself.  `state` is the sandbox's own contents between calls:

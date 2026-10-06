@@ -69,6 +69,8 @@ local NOOP = {
 	"EntityKill", "GameAddFlagRun", "GameRemoveFlagRun", "AddFlagPersistent",
 	"RemoveFlagPersistent", "GameScreenshake", "LoadPixelScene",
 	"RegisterGunAction", "RegisterGunShotEffects",
+	-- hand a finished shot's state to the game: pure plumbing, nothing to learn
+	"ConfigGunActionInfo_PassToGame", "ConfigGunShotEffects_PassToGame",
 }
 
 -- Calls whose answer decides what an action body does.  Counted in

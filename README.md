@@ -95,11 +95,10 @@ All settings are runtime-scoped and apply immediately.
   font mod (e.g. Better Font) or a language with a smooth non-pixel font
   (Japanese, …) the game ignores the smaller sizes; the panel detects that and
   switches itself to **Large** automatically (see `docs/FONT_COMPAT.md`).
-- **Wand Structure Panel: Long Rows** — a row wider than the panel is cut with
-  `...`. *Tooltip + click* (default): hover it to read the full text in a
-  tooltip, click it to open it in place and click again to close. *Wrap*: every
-  long row continues on the next line. *Truncate*: just cut. A structure taller
-  than the screen scrolls with **PageUp / PageDown**.
+- **Long rows in the panel** — a row too wide for the panel is cut with `...`:
+  hover it to read the full text in a tooltip, click it to open it in place
+  (click again to close). A structure taller than the screen scrolls with
+  **PageUp / PageDown**. (No setting: this is always on.)
 - **Slot Brackets** — the in-UI rainbow brackets (on by default).
 - **Slot Marks** — an underline under a modifier chain (the modifiers and the
   card they modify) and a red strike through cards that are drawn but never

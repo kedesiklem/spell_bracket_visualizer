@@ -1332,9 +1332,8 @@ end
 -- there takes over the full-height right column under the bars (may cover the
 -- Wet/Tinker status text, by design). Long labels are truncated to MAX_PANEL_W.
 -- `opts` (optional) lets a long structure be READ rather than cut off:
---   opts.wrap    wrap every long label onto continuation lines instead of "..."
 --   opts.expanded  { [label] = true } rows the reader opened by clicking them;
---                wrapped in full like opts.wrap does.  Written by this function.
+--                wrapped in full.  Written by this function.
 --   opts.mouse   { x, y, click } in GUI coordinates (nil = no pointer): a row cut
 --                short with "..." shows its full text in a tooltip while hovered,
 --                and a click opens / closes it.  The panel's gui stays
@@ -1374,7 +1373,7 @@ local function draw_panel(gui, rows, title, sw, sh, anchor, scale, opts)
 	do
 		local expanded = {}
 		for _, r in ipairs(rows) do
-			local open = opts.wrap or opts.expanded[r.label]
+			local open = opts.expanded[r.label]
 			local bars_w = (r.header and 0 or #r.bars) * bar_w
 			local lines = open and wrap_label(gui, r.label, scale, max_panel_w - pad * 2 - bars_w)
 				or { r.label }
@@ -1572,6 +1571,19 @@ local function draw_debug_info(gui, sw, sh, wd, per_row)
 			"uncertain=%s (%s)", wd.uncertain and "yes" or "no",
 			table.concat(wd.uncertain_ids or {}, ", "))
 		if wd.sim and wd.sim.error then lines[#lines + 1] = "engine: " .. wd.sim.error end
+		-- What exactly the engine had to guess (the usual reason brackets are hidden).
+		local guesses = wd.sim and wd.sim.uncertain
+		if guesses then
+			local function counted(set)
+				local names = {}
+				for name, n in pairs(set or {}) do names[#names + 1] = name .. " x" .. n end
+				table.sort(names)
+				return table.concat(names, ", ")
+			end
+			lines[#lines + 1] = "guess: random=" .. (guesses.random and "yes" or "no")
+				.. "  world: " .. counted(guesses.world)
+			lines[#lines + 1] = "guess: unknown engine calls: " .. counted(guesses.unknown)
+		end
 		-- Track E1: the wand's mana ceiling/regen and what each cast costs.
 		lines[#lines + 1] = string.format(
 			"mana_max=%s charge=%s",
@@ -1730,9 +1742,6 @@ function M.update()
 	-- Track C: "hide" (default) withholds slot brackets on a wand whose tier
 	-- is worse than exact; "show" draws them anyway. See draw_box_brackets.
 	local uncertain_brackets = get("spell_bracket_visualizer.uncertain_brackets") or "hide"
-	-- "tooltip" (default): cut rows show their full text on hover and open on click;
-	-- "wrap": every long row continues on the next line; "truncate": plain "...".
-	local long_labels = get("spell_bracket_visualizer.long_labels") or "tooltip"
 
 	local sw, sh = GuiGetScreenDimensions(gui)
 	-- refw: the GEOMETRY reference width. The engine draws the inventory in fixed
@@ -1794,7 +1803,6 @@ function M.update()
 			}
 			if key_pressed(KEY_PAGEDOWN) then panel_view.scroll = panel_view.scroll + SCROLL_STEP end
 			if key_pressed(KEY_PAGEUP) then panel_view.scroll = panel_view.scroll - SCROLL_STEP end
-			panel_view.wrap = long_labels == "wrap"
 			panel_view.mouse = read_pointer(sw, sh)
 			draw_panel(gui, sim_rows(wd.sim, wd.cfg, wd.always, wd.uncertain_ids),
 				title, sw, sh, anchor, panel_scale, panel_view)
