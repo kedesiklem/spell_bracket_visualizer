@@ -189,15 +189,46 @@ for _, l in ipairs(labels) do
 end
 eq("two-sticky: hidden count accounts for every content row", shown + hidden, 200)
 
--- ---- 5. T1.4 -- the named tier footnote + the always-on bracket legend -----
+-- ---- 4b. new row kinds: re-casts, skipped cards, an engine that failed -------
 
--- Regression (found in-game, v1.4.0 first run): a wand whose ONLY offender is a
--- tier-approximate card with no `dynamic` flag (Alpha) hid its brackets and drew
--- the ? glyph, but the panel never said why -- the footnote was gated on
--- any_dynamic, which only IF_*/random cards set. The row must appear, and the
--- Alpha row itself must carry the "?".
 do
-	local node = { kind = "leaf", id = "ALPHA", atype = "OTHER", modifiers = {} }
+	local function labels_of(sim)
+		local out = {}
+		for _, r in ipairs(T.sim_rows(sim, { spells_per_cast = 1 }, {})) do
+			out[#out + 1] = r.label
+		end
+		return out
+	end
+	local recast = { kind = "leaf", id = "LIGHT_BULLET", atype = "PROJECTILE", modifiers = {},
+		recast = true, count = 3 }
+	local divide = { kind = "leaf", id = "DIVIDE_3", atype = "DRAW_MANY", modifiers = {},
+		children = { recast } }
+	local labels = labels_of({ casts = { { nodes = { divide }, mana = 0 } }, wrapped = false })
+	local found
+	for _, l in ipairs(labels) do if l:find("again:", 1, true) then found = l end end
+	eq("recast row: marked, with its count", found and found:find("x3", 1, true) ~= nil, true)
+
+	local skipper = { kind = "leaf", id = "IF_ENEMY", atype = "OTHER", modifiers = {},
+		skipped = { 2, 3 } }
+	labels = labels_of({ casts = { { nodes = { skipper }, mana = 0 } }, wrapped = false })
+	found = nil
+	for _, l in ipairs(labels) do if l:find("skips 2 spells", 1, true) then found = l end end
+	eq("skipped cards: the row says how many", found ~= nil, true)
+
+	labels = labels_of({ casts = {}, error = "boom" })
+	eq("engine failure: one row naming the reason",
+		#labels == 1 and labels[1]:find("boom", 1, true) ~= nil, true)
+end
+
+-- ---- 5. T1.4 -- the named "?" footnote + the always-on bracket legend -----
+
+-- Regression (found in-game, v1.4.0 first run): a wand whose only offender was
+-- not an "If"/random card hid its brackets and drew the ? glyph, but the panel
+-- never said why. The footnote must appear whenever the engine reported an
+-- uncertain card, and that card's own row must carry the "?".
+do
+	local node = { kind = "leaf", id = "ALPHA", atype = "OTHER", modifiers = {},
+		uncertain_ids = { ALPHA = true } }
 	local sim = { casts = { { nodes = { node }, wrapped = false, mana = 40 } }, wrapped = false }
 	local rows = T.sim_rows(sim, { spells_per_cast = 1 }, {}, { "ALPHA" })
 	local footnote, alpha_row
@@ -205,7 +236,7 @@ do
 		if r.label:match("^%?%s*=") then footnote = r end
 		if r.label:find("Alpha", 1, true) and not r.label:match("^%?") then alpha_row = r end
 	end
-	eq("alpha-only: footnote present without any dynamic card", footnote ~= nil, true)
+	eq("alpha-only: footnote present", footnote ~= nil, true)
 	eq("alpha-only: footnote names Alpha", footnote and footnote.label:find("Alpha", 1, true) ~= nil, true)
 	eq("alpha-only: the Alpha row is marked ?", alpha_row and alpha_row.label:find("Alpha?", 1, true) ~= nil, true)
 end
@@ -223,9 +254,9 @@ do
 		if r.label == BRACKET_LEGEND then legend = r end
 	end
 
-	eq("tier footnote: present", footnote ~= nil, true)
-	eq("tier footnote: names Alpha", footnote and footnote.label:find("Alpha", 1, true) ~= nil, true)
-	eq("tier footnote: sticky", footnote and footnote.sticky, true)
+	eq("uncertain footnote: present", footnote ~= nil, true)
+	eq("uncertain footnote: names Alpha", footnote and footnote.label:find("Alpha", 1, true) ~= nil, true)
+	eq("uncertain footnote: sticky", footnote and footnote.sticky, true)
 
 	eq("bracket legend: present", legend ~= nil, true)
 	eq("bracket legend: sticky", legend and legend.sticky, true)

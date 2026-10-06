@@ -1,6 +1,6 @@
 #!/usr/bin/env lua5.4
 -- Runs the REAL files/grouping_overlay.lua delimiter planner (collect_delims +
--- plan_delims) against the REAL simulator and the REAL structure_meta, so the
+-- plan_delims) against the REAL engine (the game's own gun.lua, from .gun_ref/), so the
 -- slot-bracket NESTING is covered without the game:
 --
 --     lua5.4 tools/test_slot_delims.lua
@@ -21,16 +21,18 @@
 
 local here = arg[0]:match("^(.*)[/\\]") or "."
 local MOD = here .. "/.."
+local support = dofile(here .. "/test_support.lua")
+support.install_mod_loader()   -- grouping_overlay.lua resolves deps via dofile_once
+local engine = support.new_engine()
+local S = dofile_once("mods/spell_bracket_visualizer/files/wand_structure.lua")
 
--- grouping_overlay.lua resolves its deps through the game's dofile_once.
-function dofile_once(path)
-	local rel = path:match("^mods/spell_bracket_visualizer/(.*)$")
-	assert(rel, "unexpected dofile_once path: " .. tostring(path))
-	return dofile(MOD .. "/" .. rel)
+--- Simulate with the real engine; `opts` = { spells_per_cast, uses, always }.
+local function simulate(tokens, opts)
+	opts = opts or {}
+	return S.simulate(engine, { tokens = tokens, spells_per_cast = opts.spells_per_cast or 1,
+		uses = opts.uses, always = opts.always })
 end
 
-local meta = dofile(MOD .. "/files/structure_meta.lua")
-local S = dofile(MOD .. "/files/wand_structure.lua")
 local overlay = dofile(MOD .. "/files/grouping_overlay.lua")
 local T = assert(overlay._test, "grouping_overlay.lua did not return its _test exports")
 assert(T.collect_delims and T.plan_delims, "_test is missing the delimiter planner")
@@ -59,7 +61,7 @@ end
 -- row 0) unless `cols` says otherwise; the gap test at the end passes real
 -- columns.
 local function plan(tokens, spc, cols, rows)
-	local sim = S.simulate(tokens, meta, { spells_per_cast = spc })
+	local sim = simulate(tokens, { spells_per_cast = spc })
 	cols = cols or {}
 	rows = rows or {}
 	for i = 1, #tokens do
@@ -314,14 +316,14 @@ do
 		(flat and flat.y or 0) > BOX_TOP and (flat and flat.y or 0) < rows_geo[1].top)
 end
 
--- ---- 8. T1.4 -- uncertain-tier wands hide brackets, draw one "?" instead ----
+-- ---- 8. T1.4 -- uncertain wands hide brackets, draw one "?" instead -----------
 --
--- Suppression lives in draw_box_brackets (the planner never sees tier), so
--- this drives the REAL draw_box_brackets through the same kind of recording
--- Gui stubs case 7 uses. A wand whose tier is worse than "exact" (ALPHA is
--- "approximate" in structure_meta.lua) draws no bracket glyphs and exactly
--- one dim "? uncertain" tag in the box header band under "hide"; "show" draws the brackets
--- as before and no "?".
+-- Suppression lives in draw_box_brackets (the planner never sees uncertainty),
+-- so this drives the REAL draw_box_brackets through the same kind of recording
+-- Gui stubs case 7 uses. A wand whose structure depended on a guess (an "If"
+-- spell, a random draw...) draws no bracket glyphs and exactly one dim
+-- "? uncertain" tag in the box header band under "hide"; "show" draws the
+-- brackets as before and no "?".
 do
 	local drawn
 	function GuiColorSetForNextWidget() end
@@ -330,9 +332,9 @@ do
 	function GuiGetTextDimensions(gui, text) return 6 * #text, 9 end
 
 	-- Reuses case 2's ("plain") tokens, which reliably draw two nested bracket
-	-- pairs at spc=4 -- so "show" has something to show. The tier/tier_ids are
-	-- stamped independently here (as collect_wand_boxes would from wand_tier),
-	-- standing in for a wand that also holds an ALPHA somewhere.
+	-- pairs at spc=4 -- so "show" has something to show. The uncertainty flag is
+	-- stamped independently here (as collect_wand_boxes would from the engine's
+	-- report), standing in for a wand that also holds a random spell.
 	local UNCERTAIN_TOKENS = { "BURST_3", "LIGHT_BULLET", "BULLET_TIMER", "LIGHT_BULLET" }
 	local function make_wd()
 		return {
@@ -340,9 +342,9 @@ do
 			xs = { 0, 1, 2, 3 },
 			per_row = 99,
 			cfg = { shuffle = false },
-			tier = "approximate",
-			tier_ids = { "ALPHA" },
-			sim = S.simulate(UNCERTAIN_TOKENS, meta, { spells_per_cast = 4 }),
+			uncertain = true,
+			uncertain_ids = { "RANDOM_PROJECTILE" },
+			sim = simulate(UNCERTAIN_TOKENS, { spells_per_cast = 4 }),
 			rows_geo = { { top = 100, bot = 112 } },
 			right = 500,
 			top = 80,
@@ -353,15 +355,15 @@ do
 	T.draw_box_brackets(nil, 640, { make_wd() }, false, "hide")
 	local qmarks = 0
 	for _, t in ipairs(drawn.texts) do if t == "? uncertain" then qmarks = qmarks + 1 end end
-	eq("tier/hide: exactly one '?' glyph", qmarks, 1)
-	eq("tier/hide: no bracket glyphs drawn", drawn.images, 0)
+	eq("uncertain/hide: exactly one '?' glyph", qmarks, 1)
+	eq("uncertain/hide: no bracket glyphs drawn", drawn.images, 0)
 
 	drawn = { images = 0, texts = {} }
 	T.draw_box_brackets(nil, 640, { make_wd() }, false, "show")
 	qmarks = 0
 	for _, t in ipairs(drawn.texts) do if t == "? uncertain" then qmarks = qmarks + 1 end end
-	eq("tier/show: no '?' glyph", qmarks, 0)
-	passck("tier/show: brackets drawn (bracket() draws 3 GuiImage per glyph)", drawn.images > 0)
+	eq("uncertain/show: no '?' glyph", qmarks, 0)
+	passck("uncertain/show: brackets drawn (bracket() draws 3 GuiImage per glyph)", drawn.images > 0)
 end
 
 -- ---- 9. T1.7 -- read_deck stops filtering, hands back `uses` -----------------
@@ -435,10 +437,10 @@ end
 -- that pins the behavior down instead of just asserting it in a comment.
 do
 	local glyphs, groups, sim = plan(
-		{ "BURST_2", "X", "A", "B" }, 1, nil, nil)
+		{ "BURST_2", "LIGHT_BULLET", "SPITTER", "BOMB" }, 1, nil, nil)
 	-- plan() doesn't thread `uses` through simulate, so drive M.simulate
 	-- directly here the same way plan() does internally.
-	sim = S.simulate({ "BURST_2", "X", "A", "B" }, meta,
+	sim = simulate({ "BURST_2", "LIGHT_BULLET", "SPITTER", "BOMB" },
 		{ spells_per_cast = 1, uses = { [2] = 0 } })
 	local cols, rows = {}, {}
 	for i = 1, 4 do cols[i] = i - 1; rows[i] = 0 end
@@ -448,7 +450,7 @@ do
 	eq("spent-span/one cast", #sim.casts, 1)
 	local node = sim.casts[1].nodes[1]
 	eq("spent-span/BURST_2 head at slot 1", node.first, 1)
-	eq("spent-span/gather reaches slot 4 (B), past the depleted slot 2", node.last, 4)
+	eq("spent-span/gather reaches slot 4 (BOMB), past the depleted slot 2", node.last, 4)
 	eq("spent-span/cast consumed slot 2 as spent, not in a node",
 		sim.casts[1].spent and sim.casts[1].spent[1], 2)
 	eq("spent-span/the multicast bracket spans columns 0..3 (slots 1..4)",

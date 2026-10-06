@@ -150,8 +150,10 @@ Report issues at:
   mod.xml, compatibility.xml,
   mod_id.txt .................. Noita's mod manifest files
   files\grouping_overlay.lua .. reads the live wand, draws panel + brackets
-  files\wand_structure.lua .... pure simulator of the engine's draw rules
-  files\structure_meta.lua .... generated per-spell structural data
+  files\wand_structure.lua .... shapes the engine's recording into a tree
+  files\wand_sim_cache.lua .... remembers simulations between frames
+  files\engine\ ............... runs the game's own cast code (gun.lua) in a
+                                sandbox and records what it does
   files\wand_sprite_meta.lua .. generated wand-sprite sizes (box layout)
   files\ui\pixel.png .......... 1x1 pixel used to draw the bracket lines
   LICENSE ..................... MIT

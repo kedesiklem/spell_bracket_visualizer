@@ -12,27 +12,30 @@
 -- OnWorldPostUpdate. All drawing uses our own Gui at coordinates we control, so
 -- it never depends on the engine's (unexposed) spell-slot positions.
 
-local meta = dofile_once("mods/spell_bracket_visualizer/files/structure_meta.lua") or {}
 local sprite_wh_meta = dofile_once("mods/spell_bracket_visualizer/files/wand_sprite_meta.lua") or {}
 local wand_structure = dofile_once("mods/spell_bracket_visualizer/files/wand_structure.lua")
-local runtime_meta = dofile_once("mods/spell_bracket_visualizer/files/runtime_meta.lua")
+local wand_sim_cache = dofile_once("mods/spell_bracket_visualizer/files/wand_sim_cache.lua")
+local engine_module = dofile_once("mods/spell_bracket_visualizer/files/engine/engine.lua")
 
--- The EFFECTIVE metadata table: structure_meta.lua with the game's live
--- `actions` table underneath it (files/runtime_meta.lua), so spells appended by
--- other mods stop reading as cast-ending OTHER leaves. Starts as plain
--- structure_meta and is upgraded once, on the first update() -- by then every
--- mod has finished its ModLuaFileAppend. If anything about the runtime read
--- fails, `emeta` simply stays `meta` and the mod behaves exactly as before.
-local emeta = meta
-local runtime_tried = false
-local function ensure_runtime_meta()
-	if runtime_tried or not runtime_meta then return end
-	runtime_tried = true
-	local ok, merged = pcall(function()
-		runtime_meta.load()
-		return runtime_meta.merged(meta)
-	end)
-	if ok and merged then emeta = merged end
+-- The cast engine (files/engine/): the game's own gun.lua, run in a sandbox.
+-- Built on the first update() rather than at load time, because it snapshots
+-- every spell definition and by then every mod has finished appending its own
+-- spells to gun_actions.lua.  If it cannot be built the panel says why instead
+-- of guessing -- there is no second, hand-written simulator to fall back on.
+local engine, engine_error, sim_cache = nil, nil, nil
+local engine_tried = false
+local function ensure_engine()
+	if engine_tried then return end
+	engine_tried = true
+	local ok, built, err = pcall(engine_module.new_in_game)
+	if ok and built then
+		engine = built
+		sim_cache = wand_sim_cache.new(function(wand)
+			return wand_structure.simulate(engine, wand)
+		end)
+	else
+		engine_error = tostring(ok and err or built)
+	end
 end
 
 local M = {}
@@ -96,9 +99,9 @@ end
 
 -- Localized spell name ($action_*) if available, else a prettified id.
 local function display_name(id)
-	local m = emeta[id]
-	if m and m.name and type(GameTextGet) == "function" then
-		local t = GameTextGet(m.name)
+	local key = engine and engine.name_key(id)
+	if key and type(GameTextGet) == "function" then
+		local t = GameTextGet(key)
 		if t and t ~= "" then return t end
 	end
 	return pretty(id)
@@ -151,7 +154,7 @@ end
 -- always-cast cards never sit in the deck -- the engine plays them at the
 -- start of every cast -- so they must not take part in the deck simulation.
 --
--- T1.7: the simulator now models depleted cards itself (a retried-past pop
+-- T1.7: depleted cards are modelled by the engine itself (a retried-past pop
 -- that lands in cast.spent, per files/wand_structure.lua's header), so this
 -- no longer pre-filters anything. ALL non-permanent cards go into `tokens` in
 -- slot order, depleted or not, and `uses` carries every reading of
@@ -222,18 +225,19 @@ end
 -- enclosing group -- SLIME rainbow by nesting depth (wrap groups in
 -- WRAP_COLOR) -- plus its own label + type color.
 -- Nodes parsed across a wand wrap get a "~" prefix (the card came around).
--- Spells whose real effect depends on the game state at cast time get a "?"
--- after their name (meta dynamic=): the IF_* requirement spells skip part of
--- the deck when their condition is false, and the random-draw spells cast
--- extra cards no static view can show. The structure drawn is the
--- condition-true / no-extras path; the "?" says so instead of pretending.
--- A card whose tier is not "exact" (Greeks, IF_*, random draws, unknown
--- modded spells) gets the same "?": it is why the wand's slot brackets are
--- hidden, and the footnote below names it.
-local function dyn_name(id, rows)
+-- Spells whose real effect depended on the game state at cast time get a "?"
+-- after their name: the IF_* requirement spells skip part of the deck when
+-- their condition is false, and the random-draw spells cast extra cards no
+-- static view can show. The structure drawn is what the engine did in the
+-- sandbox's fake world; the "?" says so instead of pretending.
+-- A card whose behaviour depended on a guess -- it read game state the sandbox
+-- can only fake (an "If ..." spell, a nearby-enemy count), drew a random number,
+-- or called an engine function the sandbox does not model -- gets the same "?".
+-- `uncertain` is the set of such ids the engine reported for this expression
+-- (wand_structure.lua: uncertain_ids); nil means nothing was uncertain.
+local function dyn_name(id, rows, uncertain)
 	local name = display_name(id)
-	local m = emeta[id]
-	if (m and m.dynamic) or wand_structure.tier(m) ~= "exact" then
+	if uncertain and uncertain[id] then
 		rows.any_dynamic = true
 		return name .. "?"
 	end
@@ -253,16 +257,27 @@ local function walk(rows, node, ancestor_colors, depth)
 	local mods = ""
 	if node.modifiers and #node.modifiers > 0 then
 		local names = {}
-		for _, m in ipairs(node.modifiers) do names[#names + 1] = dyn_name(m, rows) end
+		for _, m in ipairs(node.modifiers) do names[#names + 1] = dyn_name(m, rows, node.uncertain_ids) end
 		mods = "[" .. table.concat(names, ", ") .. "] "
 	end
 
-	local name = dyn_name(node.id, rows)
+	local name = dyn_name(node.id, rows, node.uncertain_ids)
 	-- no "xN" / "(trig N)" suffixes (user calls, 2026-06-11): the spell name
 	-- already says it and the indented children below show what was gathered
 	-- or carried as payload
 	local label = mods .. name
 	if node.dangling then label = label .. "  (no projectile)" end
+	-- A card the engine re-ran (Divide By's copies, Alpha's self-copy, ...) is
+	-- not in the deck a second time: say it was re-cast, and how often.
+	if node.recast then
+		label = "again: " .. label
+		if node.count and node.count > 1 then label = label .. "  x" .. node.count end
+	end
+	-- Cards a spell threw away without casting them (a failed "If ...").
+	if node.skipped and #node.skipped > 0 then
+		label = label .. "  (skips " .. #node.skipped
+			.. (#node.skipped == 1 and " spell)" or " spells)")
+	end
 	if node.kind == "reset" then
 		local n = node.cleared and #node.cleared or 0
 		if n > 0 then
@@ -302,16 +317,22 @@ end
 -- Rows for the whole simulation: per-cast headers (when there is more than one
 -- cast, a wrap, or a cast that can never afford itself), the trees, a loud
 -- wrap/recharge banner, and the sticky footnotes ("?" tiers, mana overflow,
--- the bracket-definition legend). `tier_ids` (Track C) are the wand's
--- confidence-tier offenders (files/wand_structure.lua M.wand_tier); nil is
--- fine, old callers keep the generic "?" footnote.
-local function sim_rows(sim, cfg, always, tier_ids)
+-- the bracket-definition legend). `uncertain_ids` are the cards whose
+-- behaviour the engine had to guess (wand_structure.uncertain_ids); nil is fine.
+local function sim_rows(sim, cfg, always, uncertain_ids)
 	local rows = {}
+	if sim.error then
+		rows[1] = { bars = {}, label = "cannot simulate: " .. tostring(sim.error),
+			color = WRAP_COLOR }
+		return rows
+	end
+	local always_uncertain = {}
+	for _, id in ipairs(uncertain_ids or {}) do always_uncertain[id] = true end
 	if #always > 0 then
 		local names = {}
 		-- through dyn_name: an always-cast Random Spell / If is just as
 		-- unpredictable as one in the deck, and must carry the same "?".
-		for _, id in ipairs(always) do names[#names + 1] = dyn_name(id, rows) end
+		for _, id in ipairs(always) do names[#names + 1] = dyn_name(id, rows, always_uncertain) end
 		rows[#rows + 1] = { bars = {}, label = "always: " .. table.concat(names, ", "),
 			color = COLOR.PASSIVE }
 	end
@@ -360,10 +381,10 @@ local function sim_rows(sim, cfg, always, tier_ids)
 	-- sticky: these explain marks/warnings that survive the row clamp, so they
 	-- must outlive the "... +N more" cut rather than being the first lines
 	-- dropped. draw_panel holds back every trailing sticky row, in order.
-	if rows.any_dynamic or (tier_ids and #tier_ids > 0) then
-		if tier_ids and #tier_ids > 0 then
+	if rows.any_dynamic or (uncertain_ids and #uncertain_ids > 0) then
+		if uncertain_ids and #uncertain_ids > 0 then
 			local names = {}
-			for _, id in ipairs(tier_ids) do names[#names + 1] = display_name(id) end
+			for _, id in ipairs(uncertain_ids) do names[#names + 1] = display_name(id) end
 			rows[#rows + 1] = { bars = {},
 				label = "? = " .. table.concat(names, ", ") .. ": structure uncertain",
 				color = COLOR.OTHER, sticky = true }
@@ -571,11 +592,10 @@ end
 -- enclosing the whole looping structure -- see wrap_delims.
 local function collect_delims(nodes, depth, cols, rows, out)
 	for _, node in ipairs(nodes) do
-		-- A RESET node has no children -- nothing about the cards it cleared
-		-- ran -- but under the mod's bracket definition its bracket must still
-		-- enclose exactly what it removed (node.cleared), so it is
-		-- bracket-worthy on that alone, same as a node with children.
-		local worthy = (node.children and #node.children > 0)
+		-- `grouped` (wand_structure.lua) is true when the head's brackets enclose
+		-- more than one card.  A RESET has no children -- nothing it cleared ran --
+		-- but its bracket must still enclose exactly what it removed (node.cleared).
+		local worthy = node.grouped
 			or (node.kind == "reset" and node.cleared and #node.cleared > 0)
 		if worthy and node.last then
 			local head = node.head or node.first
@@ -934,24 +954,22 @@ local function collect_wand_boxes(gui, refw, per_row, ignore_depleted)
 	local box_top = BOX.top0 -- units; boxes stack, each as tall as its wand needs
 	for _, wd in ipairs(wands) do
 		wd.tokens, wd.always, wd.xs, wd.uses = read_deck(wd.e, ignore_depleted)
-		-- Track C confidence tier: the worst of every card on the wand (deck
-		-- AND always-cast -- an always-cast Greek/random spell is just as
-		-- unfollowable as one in the deck). tier_ids are the offenders, named
-		-- in the panel footnote (sim_rows) and the debug box.
-		local tier_ids_input = {}
-		for _, id in ipairs(wd.tokens) do tier_ids_input[#tier_ids_input + 1] = id end
-		for _, id in ipairs(wd.always) do tier_ids_input[#tier_ids_input + 1] = id end
-		wd.tier, wd.tier_ids = wand_structure.wand_tier(tier_ids_input, emeta, #wd.tokens)
 		wd.cfg = read_config(wd.e)
 		wd.h, wd.sprite = wand_art_wh(gui, wd.e)
 		-- ignore_depleted (default on) is the "model the engine" setting: ON
-		-- hands the live charge counts to the simulator, which retries past a
-		-- depleted card exactly as gun.lua does (no bracket on it, per
-		-- wand_structure.lua's header); OFF omits `uses` entirely and every
-		-- card is simulated as though it fires.
-		wd.sim = wand_structure.simulate(wd.tokens, emeta,
-			{ spells_per_cast = wd.cfg.spells_per_cast,
-			  uses = ignore_depleted and wd.uses or nil })
+		-- hands the live charge counts to the engine, which retries past a
+		-- depleted card exactly as gun.lua does; OFF omits `uses` entirely and
+		-- every card is simulated as though it fires.
+		if sim_cache then
+			wd.sim = sim_cache.get({ tokens = wd.tokens, always = wd.always,
+				spells_per_cast = wd.cfg.spells_per_cast, shuffle = wd.cfg.shuffle,
+				uses = ignore_depleted and wd.uses or nil })
+		else
+			wd.sim = { casts = {}, error = engine_error or "engine not ready" }
+		end
+		wd.uncertain_ids = wand_structure.uncertain_ids(wd.sim)
+		-- A wand is "uncertain" when anything on it depended on a guess.
+		wd.uncertain = #wd.uncertain_ids > 0 or wd.sim.uncertain ~= nil
 
 		-- displayed slot rows: capacity wraps every per_row slots (fall back
 		-- to the highest occupied slot if the capacity read failed). per_row is
@@ -1058,8 +1076,8 @@ local function draw_uncertain_glyph(gui, wd, refw)
 end
 
 -- `uncertain` is the uncertain_brackets setting ("hide"/"show"). Brackets are
--- withheld from a wand whose tier is worse than "exact" unless the setting is
--- "show" -- Track C, docs/ADVANCED_SCENARIOS_PLAN.md 2.
+-- withheld from a wand whose structure depended on a guess unless the setting
+-- is "show" -- Track C, docs/ADVANCED_SCENARIOS_PLAN.md 2.
 local function draw_box_brackets(gui, refw, wands, show_probe, uncertain)
 	local idc = { n = 0 }
 	if show_probe then draw_row_probe(gui, refw, wands) end
@@ -1070,7 +1088,7 @@ local function draw_box_brackets(gui, refw, wands, show_probe, uncertain)
 		-- panel still shows the slot-order tree WITH its "order varies!"
 		-- warning -- text can hedge, brackets can't.
 		if #wd.tokens > 0 and not wd.cfg.shuffle then
-			if wd.tier == "exact" or uncertain == "show" then
+			if not wd.uncertain or uncertain == "show" then
 				-- displayed position of each card: wraps every per_row slots
 				local cols, rows = {}, {}
 				for k, x in ipairs(wd.xs) do
@@ -1371,9 +1389,7 @@ local function draw_debug_info(gui, sw, sh, wd, per_row)
 		lines[#lines + 1] = string.format(
 			"rows modeled=%d   cast-wraps=%s",
 			wd.nrows, (wd.sim and wd.sim.wrapped) and "yes" or "no")
-		-- T1.7: depleted cards the simulator retried past this cast, per cast
-		-- (replaces the old "greek=" line -- the simulator models depleted
-		-- cards itself now, so there's nothing Greek-specific left to report).
+		-- Depleted cards the engine retried past this cast, per cast.
 		do
 			local spents = {}
 			if wd.sim then
@@ -1384,9 +1400,11 @@ local function draw_debug_info(gui, sw, sh, wd, per_row)
 			end
 			lines[#lines + 1] = "spent slots: " .. table.concat(spents, " | ")
 		end
-		-- Track C: the wand's confidence tier and the ids responsible.
+		-- Which cards made the engine guess (empty when the answer is certain).
 		lines[#lines + 1] = string.format(
-			"tier=%s (%s)", wd.tier or "exact", table.concat(wd.tier_ids or {}, ", "))
+			"uncertain=%s (%s)", wd.uncertain and "yes" or "no",
+			table.concat(wd.uncertain_ids or {}, ", "))
+		if wd.sim and wd.sim.error then lines[#lines + 1] = "engine: " .. wd.sim.error end
 		-- Track E1: the wand's mana ceiling/regen and what each cast costs.
 		lines[#lines + 1] = string.format(
 			"mana_max=%s charge=%s",
@@ -1401,11 +1419,9 @@ local function draw_debug_info(gui, sw, sh, wd, per_row)
 	else
 		lines[#lines + 1] = "wand:  (none held -- select/hold a wand)"
 	end
-	-- Modded-spell fallback layer (3 A1): how many spells the live `actions`
-	-- table yielded, or why the read failed.
-	if runtime_meta then
-		lines[#lines + 1] = runtime_meta.status_line()
-	end
+	lines[#lines + 1] = engine
+		and ("engine: ok, " .. engine.spell_count() .. " spells")
+		or ("engine: UNAVAILABLE (" .. tostring(engine_error) .. ")")
 	-- Font probe: RAW engine readings, no floors. The width ratio is the whole
 	-- diagnosis (docs/FONT_COMPAT.md) -- with the vanilla pixel font it equals
 	-- the requested 0.6, so "x0.60 ok" prints; under a font that ignores
@@ -1539,11 +1555,8 @@ function M.update()
 	local show_debug = get("spell_bracket_visualizer.show_debug") == true
 	if not show_panel and not show_slots and not show_debug then return end
 	-- Model depleted (0-use) spells the way gun.lua does: ON (default) hands the
-	-- simulator the live charge counts, so a depleted card is retried past (no
-	-- bracket on it, per wand_structure.lua's header); OFF pretends every card
-	-- fires. greek_keeps_depleted no longer does anything -- the simulator now
-	-- models depleted cards itself, so Greek spells see the right positions
-	-- automatically; see settings.lua.
+	-- engine the live charge counts, so a depleted card is retried past (no
+	-- bracket on it); OFF pretends every card fires.
 	local ignore_depleted = get("spell_bracket_visualizer.ignore_depleted_spells") ~= false
 	local panel_scale = PANEL_SCALE_MAP[get("spell_bracket_visualizer.panel_text_size") or "small"] or 0.6
 	-- Track C: "hide" (default) withholds slot brackets on a wand whose tier
@@ -1564,9 +1577,8 @@ function M.update()
 	-- one measure/read pass shared by the brackets and the panel's dock anchor.
 	-- per_row is the aspect-calibrated wrap column (99 = no wrap at >= 16:9)
 	local per_row = wrap_columns(sw, sh)
-	-- First frame only: fold the game's live `actions` table in under
-	-- structure_meta so modded spells simulate (and get named) correctly.
-	ensure_runtime_meta()
+	-- First frame only: build the cast engine now that every mod's spells exist.
+	ensure_engine()
 	local boxes = collect_wand_boxes(gui, refw, per_row, ignore_depleted)
 
 	if show_slots then -- brackets on every wand box (independent of active wand)
@@ -1609,7 +1621,7 @@ function M.update()
 				boxes = geo,
 				sel   = sel,
 			}
-			draw_panel(gui, sim_rows(wd.sim, wd.cfg, wd.always, wd.tier_ids), title, sw, sh, anchor, panel_scale)
+			draw_panel(gui, sim_rows(wd.sim, wd.cfg, wd.always, wd.uncertain_ids), title, sw, sh, anchor, panel_scale)
 		end
 	end
 
@@ -1653,9 +1665,8 @@ M._test = {
 	read_deck       = read_deck,
 	read_config     = read_config,
 
-	-- runtime (modded-spell) metadata layer, 3 A1
-	ensure_runtime_meta = ensure_runtime_meta,
-	effective_meta      = function() return emeta end,
+	ensure_engine = ensure_engine,
+	set_engine    = function(e) engine = e end, -- tests inject a stand-in engine
 }
 
 return M

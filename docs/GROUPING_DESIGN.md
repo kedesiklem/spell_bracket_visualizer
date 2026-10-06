@@ -1,5 +1,9 @@
 # Grouping brackets (Lisp/SLIME-style) — design
 
+> **Note.** The bracket *definition* below still holds. The implementation notes
+> that mention `structure_meta.lua` / `M.build` describe the earlier hand-written
+> simulator; the current pipeline is in `ARCHITECTURE.md`.
+
 **Goal:** show a wand's *cast structure* — which modifiers feed which projectile,
 which cards a multicast gathers, and what a trigger's payload is — as nested
 brackets, the way SLIME shows Lisp expression structure.

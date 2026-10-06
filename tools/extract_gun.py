@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
-"""Extract the game's own cast code from data.wak, for the differential harness.
+"""Extract the game's own cast code from data.wak, for the offline tests.
 
-The mod's simulator (files/wand_structure.lua) is a re-implementation of Noita's
-draw rules. tools/test_gun_differential.lua checks it against the REAL rules by
-running the engine's gun.lua over the same decks -- which means having those
-files on disk.
+The mod runs Noita's real gun.lua (files/engine/). In the game it reads those
+files through ModTextFileGetContent; the offline tests have no game, so they
+read them from .gun_ref/ instead, which this script fills.
 
 They are Noita's copyrighted content, so they are NEVER committed: this writes
 them to .gun_ref/ (gitignored) from the player's own install. That is also why
-the differential test cannot run in CI -- it needs a Noita installation.
+the tests cannot run in CI -- they need a Noita installation.
 
     python3 tools/extract_gun.py [path/to/data.wak]
 
-Pure stdlib. Paths derive from this file's location, same as gen_structure_meta.
+Pure stdlib. Paths derive from this file's location, same as the other tools/.
 """
 import struct, os, sys
 

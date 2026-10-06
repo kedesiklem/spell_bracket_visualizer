@@ -1,5 +1,10 @@
 # Advanced scenarios plan — modded spells, Greeks, Add Trigger, mana
 
+> **Historical document.** This plan describes the hand-written simulator and
+> `structure_meta.lua`, both since replaced by running the game's own `gun.lua`
+> (see `ARCHITECTURE.md`). It is kept for the reasoning behind the
+> hedge-in-text, never-lie-in-brackets policy, which still holds.
+
 Response to the Workshop thread of Sep 2–3 (KoObEy's five points, Night's
 "false results" report). The mod's own pitch has been "a teaching tool for
 early-game wrapping"; this plan is what it takes to stop leaning on that and

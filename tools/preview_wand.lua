@@ -22,20 +22,19 @@
 --                  (default: card i sits in column i-1)
 --   --plain        no ANSI colour
 --   --glyphs       also dump the raw glyph list (side, column, stack level)
---   --tier         wand structure confidence tier (exact/approximate/unknown) and
---                  which cards caused uncertainty, if any
+--   --uncertain    name the cards whose behaviour depended on a guess (an "If"
+--                  spell, a random draw...), if any
+--   --tree         also print each cast's expression tree as a Lisp line,
+--                  re-casts marked *N (e.g. Divide By)
 --   --mana         mana cost per cast
 --   --uses=SLOT:N,SLOT:N
 --                  charge counts (uses_remaining) for depleted-spell tracking
 
 local here = arg[0]:match("^(.*)[/\\]") or "."
-local MOD = here .. "/.."
+local support = dofile(here .. "/test_support.lua")
+support.install_mod_loader()
+local engine = support.new_engine()
 
-function dofile_once(path)
-	local rel = path:match("^mods/spell_bracket_visualizer/(.*)$")
-	assert(rel, "unexpected dofile_once path: " .. tostring(path))
-	return dofile(MOD .. "/" .. rel)
-end
 -- grouping_overlay only calls these when it DRAWS; loading it needs them to
 -- exist because the file is one chunk.
 function GuiZSet() end
@@ -44,19 +43,19 @@ function GuiImage() end
 function GuiText() end
 function GuiGetTextDimensions() return 0, 0 end
 
-local meta = dofile(MOD .. "/files/structure_meta.lua")
-local S = dofile(MOD .. "/files/wand_structure.lua")
-local T = assert(dofile(MOD .. "/files/grouping_overlay.lua")._test,
+local S = dofile_once("mods/spell_bracket_visualizer/files/wand_structure.lua")
+local T = assert(dofile_once("mods/spell_bracket_visualizer/files/grouping_overlay.lua")._test,
 	"grouping_overlay.lua did not return its _test exports")
 
 -- ---- args ------------------------------------------------------------------
 
 local spells, per_cast, cols_arg, plain, show_glyphs = nil, 1, nil, false, false
-local show_tier, show_mana, uses_arg = false, false, nil
+local show_uncertain, show_mana, show_tree, uses_arg = false, false, false, nil
 for _, a in ipairs(arg) do
 	if a == "--plain" then plain = true
 	elseif a == "--glyphs" then show_glyphs = true
-	elseif a == "--tier" then show_tier = true
+	elseif a == "--uncertain" then show_uncertain = true
+	elseif a == "--tree" then show_tree = true
 	elseif a == "--mana" then show_mana = true
 	elseif a:match("^%-%-per%-cast=") then per_cast = tonumber(a:match("=(.+)")) or 1
 	elseif a:match("^%-%-cols=") then cols_arg = a:match("=(.+)")
@@ -67,7 +66,7 @@ for _, a in ipairs(arg) do
 end
 if not spells then
 	io.stderr:write("usage: lua tools/preview_wand.lua SPELL,SPELL,... " ..
-		"[--per-cast=N] [--cols=A,B,...] [--plain] [--glyphs] [--tier] [--mana] [--uses=SLOT:N,SLOT:N]\n")
+		"[--per-cast=N] [--cols=A,B,...] [--plain] [--glyphs] [--uncertain] [--tree] [--mana] [--uses=SLOT:N,SLOT:N]\n")
 	os.exit(2)
 end
 
@@ -77,14 +76,14 @@ if #tokens == 0 then io.stderr:write("no spells given\n"); os.exit(2) end
 
 local unknown = {}
 for _, id in ipairs(tokens) do
-	if not meta[id] then unknown[#unknown + 1] = id end
+	if not engine.knows(id) then unknown[#unknown + 1] = id end
 end
 if #unknown > 0 then
-	-- Not fatal: the simulator treats an unknown id as a plain projectile,
-	-- which is also what it does for a modded spell in game. Say so, since an
-	-- id typo would otherwise silently change the structure.
-	io.stderr:write("warning: not in structure_meta (treated as a plain spell): "
+	-- The engine refuses a wand holding a spell the game does not define, so an
+	-- id typo is reported rather than silently changing the structure.
+	io.stderr:write("error: not a spell the game defines: "
 		.. table.concat(unknown, ", ") .. "\n")
+	os.exit(2)
 end
 
 local cols, rows = {}, {}
@@ -128,9 +127,9 @@ end
 
 -- ---- build ------------------------------------------------------------------
 
-local opts = { spells_per_cast = per_cast }
-if next(uses) then opts.uses = uses end
-local sim = S.simulate(tokens, meta, opts)
+local sim = S.simulate(engine, { tokens = tokens, spells_per_cast = per_cast,
+	uses = next(uses) and uses or nil })
+if sim.error then io.stderr:write("error: " .. sim.error .. "\n"); os.exit(1) end
 local groups = T.collect_wand_delims(sim, cols, rows)
 local glyphs = T.plan_delims(groups)
 
@@ -176,12 +175,10 @@ print(string.format("%d spells, %d per cast, %d cast%s%s",
 	#tokens, per_cast, #sim.casts, #sim.casts == 1 and "" or "s",
 	sim.wrapped and "  -- WRAPS" or ""))
 
-if show_tier then
-	local tier, offenders = S.wand_tier(tokens, meta)
-	print("tier: " .. tier)
-	if #offenders > 0 then
-		print("  uncertain: " .. table.concat(offenders, ", "))
-	end
+if show_uncertain then
+	local ids = S.uncertain_ids(sim)
+	print(#ids == 0 and "certain: nothing depended on a guess"
+		or "uncertain: " .. table.concat(ids, ", "))
 end
 
 print()
@@ -208,6 +205,24 @@ for ci, cast in ipairs(sim.casts) do
 		ci, tostring(cast.first), tostring(cast.last),
 		cast.wfirst and ("  WRAPS in " .. cast.wfirst .. ".." .. cast.wlast) or "",
 		#cast.nodes, #cast.nodes == 1 and "" or "s", table.concat(names, ", "), suffix))
+end
+if show_tree then
+	-- The expression tree as a Lisp line: "(head child child)", modifiers in [ ].
+	local function lisp(e)
+		local text = (#e.modifiers > 0 and ("[" .. table.concat(e.modifiers, ",") .. "] ") or "")
+			.. pretty(e.id)
+		if e.recast then text = text .. " *" .. (e.count or 1) end
+		if #(e.children or {}) == 0 then return text end
+		local kids = {}
+		for _, c in ipairs(e.children) do kids[#kids + 1] = lisp(c) end
+		return "(" .. text .. " " .. table.concat(kids, " ") .. ")"
+	end
+	for ci, cast in ipairs(sim.casts) do
+		local parts = {}
+		for _, n in ipairs(cast.nodes) do parts[#parts + 1] = lisp(n) end
+		print(string.format("  cast %d: %s", ci, table.concat(parts, "  ")))
+	end
+	print()
 end
 print()
 print(string.format("  %d delimiter%s:", #groups, #groups == 1 and "" or "s"))

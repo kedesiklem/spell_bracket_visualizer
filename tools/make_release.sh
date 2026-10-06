@@ -27,8 +27,13 @@ payload=(
 	mod_id.txt
 	files/grouping_overlay.lua
 	files/wand_structure.lua
-	files/structure_meta.lua
-	files/runtime_meta.lua
+	files/wand_sim_cache.lua
+	files/engine/lua_compat.lua
+	files/engine/engine_stubs.lua
+	files/engine/game_env.lua
+	files/engine/cast_tracer.lua
+	files/engine/wand_runner.lua
+	files/engine/engine.lua
 	files/wand_sprite_meta.lua
 	files/ui/pixel.png
 	LICENSE

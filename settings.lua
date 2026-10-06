@@ -33,16 +33,9 @@ mod_settings = {
 		scope = MOD_SETTING_SCOPE_RUNTIME,
 	},
 	{
-		id = "greek_keeps_depleted",
-		ui_name = "Greek Wands: Keep Depleted Spells",
-		ui_description = "No longer does anything: the mod now models depleted spells\nthe way the game does, so Greek spells see the right positions\nautomatically. This option will be removed in the next release.",
-		value_default = true,
-		scope = MOD_SETTING_SCOPE_RUNTIME,
-	},
-	{
 		id = "uncertain_brackets",
 		ui_name = "Uncertain Wands: Slot Brackets",
-		ui_description = "A wand holding a spell whose deck effect this mod can't\nfollow exactly (Greek spells, IF spells, random draws, unknown\nmodded spells) draws no slot brackets, and shows a small dim\n'?' at the end of the row instead. Hide keeps that rule. Show\ndraws the brackets anyway, with '?' marks in the panel, for\nplayers who want the approximation and know what it is.",
+		ui_description = "A wand holding a spell whose effect depended on a guess (an\nIF spell reading the world, a random draw, an engine call the\nmod can't model) draws no slot brackets, and shows a small dim\n'?' at the end of the row instead. Hide keeps that rule. Show\ndraws the brackets anyway, with '?' marks in the panel, for\nplayers who want the approximation and know what it is.",
 		value_default = "hide",
 		values = { { "hide", "Hide (default)" }, { "show", "Show anyway" } },
 		scope = MOD_SETTING_SCOPE_RUNTIME,
