@@ -19,6 +19,14 @@ mod_settings = {
 		scope = MOD_SETTING_SCOPE_RUNTIME,
 	},
 	{
+		id = "long_labels",
+		ui_name = "Wand Structure Panel: Long Rows",
+		ui_description = "A row wider than the panel either wraps onto the next line\n(default, so you can read it in full) or is cut short with '...'.\nA structure taller than the screen scrolls with PageUp / PageDown.",
+		value_default = "wrap",
+		values = { { "wrap", "Wrap (default)" }, { "truncate", "Truncate with ..." } },
+		scope = MOD_SETTING_SCOPE_RUNTIME,
+	},
+	{
 		id = "show_slot_brackets",
 		ui_name = "Slot Brackets",
 		ui_description = "Rainbow nesting brackets on the spell cards in the wand UI,\nlike nested code brackets: each group's span, and wand\nwrapping in orange.",

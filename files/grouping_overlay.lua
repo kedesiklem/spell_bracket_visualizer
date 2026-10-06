@@ -42,6 +42,19 @@ end
 local M = {}
 local gui = nil
 
+-- Reading a structure too long for the screen: PageUp / PageDown scroll the
+-- panel (SDL scancodes, which is what the game's Input API takes).  The panel's
+-- gui is non-interactive on purpose, so the mouse wheel is not used.
+local KEY_PAGEUP, KEY_PAGEDOWN = 75, 78
+local SCROLL_STEP = 5
+local panel_view = { scroll = 0 }
+
+local function key_pressed(code)
+	if type(InputIsKeyJustDown) ~= "function" then return false end
+	local ok, down = pcall(InputIsKeyJustDown, code)
+	return ok and down == true
+end
+
 -- Shown in the debug info box so a bug-report screenshot self-identifies the
 -- build. Bump on each Workshop release.
 local VERSION = "v1.4.0"
@@ -1274,6 +1287,28 @@ local function fit_label(gui, text, scale, max_px)
 	return s .. "..."
 end
 
+-- Break a label into lines that each measure within max_px, at word boundaries,
+-- so a long row can be READ in full instead of being cut to "...".  Continuation
+-- lines are indented two spaces.  A single word wider than a line is trimmed
+-- (fit_label) -- there is nowhere else to put it.
+local CONTINUATION = "  "
+local function wrap_label(gui, text, scale, max_px)
+	if (text_dims(gui, text, scale)) <= max_px then return { text } end
+	local lines, line = {}, ""
+	for word in text:gmatch("%S+") do
+		local candidate = (line == "") and word or (line .. " " .. word)
+		local prefixed = (#lines > 0 and CONTINUATION or "") .. candidate
+		if line ~= "" and (text_dims(gui, prefixed, scale)) > max_px then
+			lines[#lines + 1] = (#lines > 0 and CONTINUATION or "") .. line
+			line = word
+		else
+			line = candidate
+		end
+	end
+	if line ~= "" then lines[#lines + 1] = (#lines > 0 and CONTINUATION or "") .. line end
+	return lines
+end
+
 -- Companion cast-structure panel for the held wand, drawn RIGHT-ANCHORED.
 -- Overlap with other wands is acceptable (the panel is opaque and topmost), so
 -- placement is simple: pin the right edge near the screen edge and grow the
@@ -1281,8 +1316,14 @@ end
 -- selected wand's height (clamped below the HP bars); a long one that won't fit
 -- there takes over the full-height right column under the bars (may cover the
 -- Wet/Tinker status text, by design). Long labels are truncated to MAX_PANEL_W.
-local function draw_panel(gui, rows, title, sw, sh, anchor, scale)
+-- `opts` (optional) lets a long structure be READ rather than cut off:
+--   opts.wrap    wrap long labels onto continuation lines instead of "..."
+--   opts.scroll  first visible content row, 0-based; clamped here and written
+--                back, so the caller keeps the position between frames.  A
+--                non-nil value also turns on the "PgUp/PgDn" hint line.
+local function draw_panel(gui, rows, title, sw, sh, anchor, scale, opts)
 	if #rows == 0 then return end
+	opts = opts or {}
 
 	-- Under a font that ignores fractional scale this snaps to 1.0; the whole
 	-- rest of the function then measures and draws at the same size. Must come
@@ -1308,6 +1349,20 @@ local function draw_panel(gui, rows, title, sw, sh, anchor, scale)
 	local avail = sw - RIGHT_MARGIN - PANEL_GAP - sel_right
 	local max_panel_w = math.min(MAX_PANEL_W, sw * 0.5, avail)
 	if max_panel_w < 60 then max_panel_w = 60 end -- floor for a near-full-width active wand
+	if opts.wrap then
+		local expanded = {}
+		for _, r in ipairs(rows) do
+			local bars_w = (r.header and 0 or #r.bars) * bar_w
+			local lines = wrap_label(gui, r.label, scale, max_panel_w - pad * 2 - bars_w)
+			for _, text in ipairs(lines) do
+				local copy = {}
+				for k, v in pairs(r) do copy[k] = v end
+				copy.label = text
+				expanded[#expanded + 1] = copy
+			end
+		end
+		rows = expanded
+	end
 	local max_w = (text_dims(gui, title, scale))
 	for _, r in ipairs(rows) do
 		local bars_w = (r.header and 0 or #r.bars) * bar_w
@@ -1356,14 +1411,38 @@ local function draw_panel(gui, rows, title, sw, sh, anchor, scale)
 		while rows[#rows - n_sticky] and rows[#rows - n_sticky].sticky do
 			n_sticky = n_sticky + 1
 		end
-		local budget = math.max(1, max_rows - n_sticky)
+		local hint = opts.scroll ~= nil
+		local budget = math.max(1, max_rows - n_sticky - (hint and 1 or 0))
 		local content = #rows - n_sticky
+		-- The window: with a row above and one below reserved, budget-2 content rows
+		-- show; the last page needs no "more" row, so it ends flush at `content`.
+		local scroll = math.floor(opts.scroll or 0)
+		local max_scroll = math.max(0, content - math.max(1, budget - 2))
+		scroll = math.max(0, math.min(scroll, max_scroll))
+		if opts.scroll ~= nil then opts.scroll = scroll end
+
 		local kept = {}
-		for i = 1, budget - 1 do kept[i] = rows[i] end
-		kept[budget] = { bars = {},
-			label = "... +" .. (content - budget + 1) .. " more",
-			color = HEADER_COLOR }
+		local first = scroll + 1
+		if scroll > 0 then
+			kept[#kept + 1] = { bars = {}, label = "^ " .. scroll .. " above",
+				color = HEADER_COLOR }
+		end
+		local room = budget - #kept
+		local last = first + room - 1
+		if last < content then
+			last = last - 1 -- keep a row for "... +N more"
+		else
+			last = content
+		end
+		for i = first, last do kept[#kept + 1] = rows[i] end
+		if last < content then
+			kept[#kept + 1] = { bars = {},
+				label = "... +" .. (content - last) .. " more", color = HEADER_COLOR }
+		end
 		for i = content + 1, #rows do kept[#kept + 1] = rows[i] end
+		if hint then
+			kept[#kept + 1] = { bars = {}, label = "PgUp/PgDn: scroll", color = COLOR.OTHER }
+		end
 		rows = kept
 	end
 
@@ -1594,6 +1673,8 @@ function M.update()
 	-- Track C: "hide" (default) withholds slot brackets on a wand whose tier
 	-- is worse than exact; "show" draws them anyway. See draw_box_brackets.
 	local uncertain_brackets = get("spell_bracket_visualizer.uncertain_brackets") or "hide"
+	-- "wrap" (default) continues a long row on the next line; "truncate" cuts it to "...".
+	local long_labels = get("spell_bracket_visualizer.long_labels") or "wrap"
 
 	local sw, sh = GuiGetScreenDimensions(gui)
 	-- refw: the GEOMETRY reference width. The engine draws the inventory in fixed
@@ -1653,7 +1734,11 @@ function M.update()
 				boxes = geo,
 				sel   = sel,
 			}
-			draw_panel(gui, sim_rows(wd.sim, wd.cfg, wd.always, wd.uncertain_ids), title, sw, sh, anchor, panel_scale)
+			if key_pressed(KEY_PAGEDOWN) then panel_view.scroll = panel_view.scroll + SCROLL_STEP end
+			if key_pressed(KEY_PAGEUP) then panel_view.scroll = panel_view.scroll - SCROLL_STEP end
+			panel_view.wrap = long_labels ~= "truncate"
+			draw_panel(gui, sim_rows(wd.sim, wd.cfg, wd.always, wd.uncertain_ids),
+				title, sw, sh, anchor, panel_scale, panel_view)
 		end
 	end
 
@@ -1680,6 +1765,7 @@ M._test = {
 	text_dims       = text_dims,
 	faithful_scale  = faithful_scale,
 	fit_label       = fit_label,
+	wrap_label      = wrap_label,
 	draw_panel      = draw_panel,
 	PANEL_SCALE_MAP = PANEL_SCALE_MAP,
 	collect_delims  = collect_delims,

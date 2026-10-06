@@ -403,6 +403,54 @@ do
 		reset_row and reset_row.label:find("(nothing left to clear)", 1, true) ~= nil, true)
 end
 
+-- ---- 6. long rows wrap instead of being cut; tall structures scroll ----------
+
+do
+	-- pixel-like font stub: 6 * scale px per char
+	local long = "Light Bullet Trigger Spitter Damage Plus Heavy Spread Bouncing"
+	local wrapped = T.wrap_label(nil, long, 1.0, 120)
+	eq("wrap: a long label becomes several lines", #wrapped > 1, true)
+	local rebuilt = {}
+	for _, l in ipairs(wrapped) do rebuilt[#rebuilt + 1] = (l:gsub("^%s+", "")) end
+	eq("wrap: no word is lost", table.concat(rebuilt, " "), long)
+	local fits = true
+	for _, l in ipairs(wrapped) do if #l * 6 > 120 then fits = false end end
+	eq("wrap: every line fits the width", fits, true)
+	eq("wrap: a short label is left alone", T.wrap_label(nil, "short", 1.0, 120)[1], "short")
+
+	local anchor = { boxes = { { top = 48, right = 400 } }, sel = 1 }
+	drawn = { texts = {} }
+	T.draw_panel(nil, { { bars = {}, label = long, color = GREY } }, TITLE, 640, 360,
+		anchor, 1.0, { wrap = true })
+	local all = {}
+	for _, t in ipairs(drawn.texts) do
+		if t.text ~= TITLE and t.text ~= "|" then all[#all + 1] = (t.text:gsub("^%s+", "")) end
+	end
+	eq("panel wrap: nothing truncated with '...'", table.concat(all, " "):find("...", 1, true), nil)
+	eq("panel wrap: full text readable", table.concat(all, " "), long)
+
+	local function page(scroll)
+		local view = { scroll = scroll }
+		drawn = { texts = {} }
+		T.draw_panel(nil, content_rows(200), TITLE, 640, 360, anchor, 1.0, view)
+		local labels = {}
+		for _, t in ipairs(drawn.texts) do
+			if t.text ~= TITLE and t.text ~= "|" then labels[#labels + 1] = t.text end
+		end
+		return labels, view.scroll
+	end
+	eq("scroll: first page starts at spell 1", page(0)[1], "spell 1")
+	local mid = page(10)
+	eq("scroll: scrolled page starts with the 'above' row", mid[1], "^ 10 above")
+	eq("scroll: then spell 11", mid[2], "spell 11")
+	local bottom, clamped = page(10000)
+	eq("scroll: clamped to the last page", clamped < 10000, true)
+	local last_content
+	for _, l in ipairs(bottom) do if l:match("^spell %d+$") then last_content = l end end
+	eq("scroll: the last spell is reachable", last_content, "spell 200")
+	eq("scroll: the hint is shown", bottom[#bottom], "PgUp/PgDn: scroll")
+end
+
 print("")
 print(failures .. " failure(s)")
 os.exit(failures == 0 and 0 or 1)
