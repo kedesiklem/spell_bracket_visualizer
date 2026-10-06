@@ -901,12 +901,30 @@ local MARK_UNDERLINE_DROP = 2  -- GUI below the bracket hooks' bottom edge; keep
                                -- clear of the level-0 hooks it would otherwise touch
 local MARK_INSET = 1           -- GUI trimmed off each end, so neighbouring chains stay apart
 local STRIKE_COLOR = { 1.00, 0.30, 0.30 }
--- "copied" dots: small and cool-toned so they read as a footnote on the card,
--- not as another bracket.  One dot per copier, at most MAX_COPY_DOTS drawn.
-local COPY_COLOR    = { 0.40, 0.90, 0.90 }
+-- "copied" dots: small, one per KIND of copier, each kind in its own colour so
+-- a card copied by Alpha and Gamma shows two distinguishable dots.  The Greek
+-- letters and Double Spell have fixed colours; a modded copier gets the next
+-- free one from COPY_SPARE, by its id, so the colour is stable between frames.
+local COPY_COLORS = {
+	ALPHA     = { 0.40, 0.90, 0.90 },
+	GAMMA     = { 1.00, 0.80, 0.30 },
+	TAU       = { 0.95, 0.50, 0.95 },
+	OMEGA     = { 1.00, 0.45, 0.45 },
+	PHI       = { 0.50, 0.65, 1.00 },
+	MU        = { 0.55, 0.95, 0.45 },
+	SIGMA     = { 1.00, 0.68, 0.28 },
+	DUPLICATE = { 0.90, 0.90, 0.90 },
+}
+local COPY_SPARE = { { 0.70, 0.55, 1.00 }, { 0.30, 0.80, 0.60 }, { 0.95, 0.60, 0.60 } }
 local COPY_DOT      = 2    -- GUI px, square
 local COPY_DOT_GAP  = 2
-local MAX_COPY_DOTS = 4
+
+local function copy_color(id)
+	if COPY_COLORS[id] then return COPY_COLORS[id] end
+	local sum = 0
+	for i = 1, #id do sum = sum + id:byte(i) end
+	return COPY_SPARE[sum % #COPY_SPARE + 1]
+end
 
 -- Draw what slot_marks.collect planned.  Only geometry lives here: which cards
 -- get a mark, and why, is decided in slot_marks.lua.
@@ -924,14 +942,14 @@ local function draw_marks(gui, marks, refw, rows_geo, idc)
 			local x1, x2 = left_of(mark.col) + MARK_INSET + 2, right_of(mark.col) - MARK_INSET - 2
 			line(gui, 72000 + idc.n, x1, (yr.top + yr.bot) / 2, x2 - x1, 1, STRIKE_COLOR, 0.9)
 		elseif mark.kind == "copied" then
-			-- a centred row of dots just above the card's top edge
-			local dots = math.min(mark.n, MAX_COPY_DOTS)
+			-- a centred row of dots just above the card's top edge, one per copier kind
+			local dots = #mark.by
 			local width = dots * COPY_DOT + (dots - 1) * COPY_DOT_GAP
 			local centre = (left_of(mark.col) + right_of(mark.col)) / 2
-			for d = 0, dots - 1 do
+			for d, id in ipairs(mark.by) do
 				idc.n = idc.n + 1
-				line(gui, 72000 + idc.n, centre - width / 2 + d * (COPY_DOT + COPY_DOT_GAP),
-					yr.top - COPY_DOT - 1, COPY_DOT, COPY_DOT, COPY_COLOR, 0.95)
+				line(gui, 72000 + idc.n, centre - width / 2 + (d - 1) * (COPY_DOT + COPY_DOT_GAP),
+					yr.top - COPY_DOT - 1, COPY_DOT, COPY_DOT, copy_color(id), 0.95)
 			end
 		end
 	end

@@ -111,7 +111,8 @@ repeats (`Damage x3`) rather than as extra bullets.
 
 **Greek letters (and any card that re-runs another).** A re-cast keeps the slot
 of the card whose body ran (`sources`). The panel says `(copies slot 3)` and the
-wand gets a small dot above that card, one per copier. A card copying itself
+wand gets a small dot above that card, one per kind of copier (two Alphas copy
+the same card), each kind in its own colour. A card copying itself
 (Alpha as the first card) is not marked.
 
 **Add Trigger / Add Timer / Add Expiration Trigger.** The recording says what

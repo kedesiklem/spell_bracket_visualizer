@@ -103,8 +103,8 @@ All settings are runtime-scoped and apply immediately.
 - **Slot Marks** — an underline under a modifier chain (the modifiers and the
   card they modify) and a red strike through cards that are drawn but never
   fire: depleted spells, cards a failed IF threw away, plus a small dot above a
-  card that a Greek letter (or Double Spell...) copied, one dot per copier (on
-  by default).
+  card that a Greek letter (or Double Spell...) copied, one dot per kind of
+  copier, each in its own colour (on by default).
 - **Ignore Depleted Spells** — model spells with 0 charges the way the game
   does it (they're skipped and the next card drawn instead), giving the right
   wand structure and wrap points. Turn off to pretend every card fires,

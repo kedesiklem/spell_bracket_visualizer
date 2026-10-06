@@ -10,8 +10,10 @@
 --               a failed "If ..." threw away.
 --   copied      a card whose body another card re-ran: what Alpha, Gamma, Tau,
 --               Omega, Double Spell... copied.  A small dot above the card, one
---               per copier, so "which spell is this Greek letter copying?" is
---               answered on the wand itself.  Only wands with a copier get any.
+--               per KIND of copier (every Alpha copies the same card, so two
+--               Alphas share a dot), so "which spell is this Greek letter
+--               copying?" is answered on the wand itself.  The overlay gives
+--               each kind its own colour.  Only wands with a copier get any.
 --
 -- This module is pure -- slots in, columns out, no Gui and no pixels -- exactly
 -- like the bracket planner, so it is tested without the game.  What each mark
@@ -24,7 +26,7 @@
 --     rows  deck slot -> displayed slot row (0-based)
 --   mark = { kind = "underline", ca, cb, row }   columns ca..cb on one row
 --        | { kind = "strike", col, row }
---        | { kind = "copied", col, row, n }   n copiers re-ran this card
+--        | { kind = "copied", col, row, by = { action_id... } }   copier kinds, sorted
 
 local M = {}
 
@@ -43,9 +45,9 @@ local function underline_of(expr, cols, rows)
 	return { kind = "underline", ca = cols[lo], cb = cols[hi], row = rows[lo] or 0 }
 end
 
--- Tally which slots were copied, by how many copiers.  A copy of the copier
--- itself (Alpha as the first card copies Alpha) says nothing about another card
--- and is not counted.
+-- Tally which slots were copied, and by which KINDS of copier (tally[slot] =
+-- { [copier id] = true }).  A copy of the copier itself (Alpha as the first card
+-- copies Alpha) says nothing about another card and is not counted.
 local function tally_copies(expr, tally)
 	-- the copier's own slot: where it was drawn, or -- for a copy that itself
 	-- copies -- the slot of the card whose body is running
@@ -53,7 +55,10 @@ local function tally_copies(expr, tally)
 	for _, child in ipairs(expr.children or {}) do
 		if child.recast then
 			for _, slot in ipairs(child.sources or {}) do
-				if slot ~= own then tally[slot] = (tally[slot] or 0) + (child.count or 1) end
+				if slot ~= own then
+					tally[slot] = tally[slot] or {}
+					tally[slot][expr.id] = true
+				end
 			end
 		end
 	end
@@ -91,7 +96,10 @@ function M.collect(sim, cols, rows)
 	table.sort(slots)
 	for _, slot in ipairs(slots) do
 		if cols[slot] then
-			out[#out + 1] = { kind = "copied", col = cols[slot], row = rows[slot] or 0, n = tally[slot] }
+			local by = {}
+			for id in pairs(tally[slot]) do by[#by + 1] = id end
+			table.sort(by)
+			out[#out + 1] = { kind = "copied", col = cols[slot], row = rows[slot] or 0, by = by }
 		end
 	end
 	return out

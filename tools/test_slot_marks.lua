@@ -31,7 +31,7 @@ local function plan(tokens, uses)
 	local out = {}
 	for _, m in ipairs(marks_of.collect(sim, cols, rows)) do
 		if m.kind == "underline" then out[#out + 1] = string.format("underline %d-%d", m.ca, m.cb)
-		elseif m.kind == "copied" then out[#out + 1] = string.format("copied %d x%d", m.col, m.n)
+		elseif m.kind == "copied" then out[#out + 1] = string.format("copied %d by %s", m.col, table.concat(m.by, "+"))
 		else out[#out + 1] = string.format("strike %d", m.col) end
 	end
 	return table.concat(out, " | "), marks_of.collect(sim, cols, rows)
@@ -49,15 +49,17 @@ eq("a depleted card is struck through",
 
 -- what a copier re-ran gets a dot; a card nobody copied gets none
 eq("alpha marks the card it copied (slot 1 -> column 0)",
-	(plan({ "LIGHT_BULLET", "ALPHA", "BOMB" })), "copied 0 x1")
+	(plan({ "LIGHT_BULLET", "ALPHA", "BOMB" })), "copied 0 by ALPHA")
 eq("a wand without a copier has no copy marks",
 	(plan({ "LIGHT_BULLET", "BOMB" })), "")
 eq("alpha copying itself marks nothing (it is not another card)",
 	(plan({ "ALPHA", "LIGHT_BULLET" })), "")
 eq("omega marks every card it re-ran",
-	(plan({ "LIGHT_BULLET", "BOMB", "OMEGA" })), "copied 0 x1 | copied 1 x1")
-eq("two copiers of the same card stack on it",
-	(plan({ "LIGHT_BULLET", "ALPHA", "ALPHA", "BOMB" })), "copied 0 x2")
+	(plan({ "LIGHT_BULLET", "BOMB", "OMEGA" })), "copied 0 by OMEGA | copied 1 by OMEGA")
+eq("two Alphas copy the same card: one dot, not two",
+	(plan({ "LIGHT_BULLET", "ALPHA", "ALPHA", "BOMB" })), "copied 0 by ALPHA")
+eq("each kind of copier marks the card it copied",
+	(plan({ "LIGHT_BULLET", "ALPHA", "GAMMA", "BOMB" })), "copied 0 by ALPHA | copied 3 by GAMMA")
 
 -- a chain that sits on two displayed rows draws nothing rather than a bad line
 do
