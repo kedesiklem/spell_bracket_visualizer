@@ -697,12 +697,13 @@ local BOX = {
 	-- shrinking with the sprite -- it has to hold the "Shuffle / Spells per cast"
 	-- header whatever the art does -- so the line is clamped at min_h instead of
 	-- extrapolated (which predicted a box ~1.4u too short at h5 and put every
-	-- bracket on such a wand too high).  Measured on wand_0654 (h5) from a
-	-- debug-mode screenshot, 2026-10-07: box_h ~34.5u, row_top ~19.2u; the stack
-	-- below it drifted ~1u until the floor was added.  min_h = 6.2 gives row_top
-	-- 19.05u / box_h 34.65u, and leaves every h>=7 wand untouched.  One sample:
-	-- if another thin wand sits wrong, pin it in SPRITE_OVERRIDES.
-	min_h   = 6.2,   -- px: sprite thickness below which the box stops shrinking
+	-- bracket on such a wand too high).  Measured on wand_0654 (h5) from two
+	-- debug-mode screenshots, 2026-10-07 (pixel-level: card tops, box borders):
+	-- row_top ~18.7u, box_h ~34.3u.  min_h = 5.9 gives 18.68u / 34.28u, which
+	-- also removes the 1px-per-box drift the stack below it had, and leaves every
+	-- h>=7 wand untouched.  One sample: if another thin wand sits wrong, pin it
+	-- in SPRITE_OVERRIDES.
+	min_h   = 5.9,   -- px: sprite thickness below which the box stops shrinking
 	row_a   = 11.3,  -- units: slot-row offset (box top -> row top) at h=0 (intercept)
 	row_b   = 1.25,  -- units: row-offset growth per px of sprite thickness h
 	below_c = 15.6,  -- units: box bottom sits this far below the row top (measured)
