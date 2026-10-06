@@ -105,7 +105,12 @@ thing only it does: its body returns an iteration count. The runs of its target
 are pooled into one node, so a chain collapses to `[Divide 3, Divide 2] Light
 Bullet x6`, where 6 is simply how many times the engine ran the bullet (the
 depth cut-off that drops a deep Divide By to one run is the engine's, not ours).
-Identical neighbours fold (`Divide 4 x3`). A target that draws pulls itself back
+Identical neighbours fold (`Divide 4 x3`). When the target really ran more
+than once the whole chain is shown as ONE entry, `Divide by 80` (`D80` in
+compact text): the adapter exports `divisor` (the target's exact run count) and
+`divider_at` (which modifiers are Divide By cards), and the panel counts the
+remaining modifiers by name across the chain. A chain whose target ran once has
+no honest number, so it keeps listing its cards. A target that draws pulls itself back
 off the deck, so a modifier under a Divide By is reported as the thing that
 repeats (`Damage x3`) rather than as extra bullets.
 

@@ -61,6 +61,9 @@
 --   silent_runs    of those, how many drew nothing (only for a head that draws)
 --   divided        a Divide By chain leads the head; the bracket opens at the first
 --                  Divide By and encloses the whole chain
+--   divisor        (with divided) the target's exact run count, i.e. the product
+--                  of the chain's Divide By cards; divider_at = { [index in
+--                  modifiers] = true } marks those cards
 --   link_runs      { [index in modifiers] = N } a modifier a Divide By re-ran
 --   grouped        the head's brackets enclose more than one card
 --   first, last    every slot the expression removed; the span first..last reaches
@@ -451,6 +454,19 @@ function build_expression(ctx, node)
 			if divider[link] then expr.head = link.slot; break end
 		end
 		expr.divided = true
+		-- The whole chain as one number, for display: the target ran `divisor`
+		-- times (the product of the Divide By cards when they simply stack).
+		-- `divider_at` says which entries of `modifiers` are the Divide By cards.
+		-- Only offered when the target really ran more than once; a chain the
+		-- engine collapsed into a single run has no honest number to show, so it
+		-- keeps listing its cards.
+		if runs[cur] and runs[cur] > 1 then
+			expr.divisor = runs[cur]
+			expr.divider_at = {}
+			for index, link in ipairs(chain) do
+				if divider[link] then expr.divider_at[index] = true end
+			end
+		end
 	end
 	-- How many times each link of the chain ran (a Damage run twice by a
 	-- Divide By is applied twice).  A Divide By itself is not counted: its

@@ -103,6 +103,9 @@ All settings are runtime-scoped and apply immediately.
   over. A one-line key appears under the structure only when a symbol is on
   screen. Off by default; all wording lives in one table (`WORDS` in
   `grouping_overlay.lua`).
+- **Wand Structure Panel: Legend** — the explanatory lines under the structure
+  (what `[ ]`, `?` and the mana line mean, and the compact text's key). Off by
+  default; the warning naming the uncertain spells always stays.
 - **Panel size and reading** — the panel has a fixed, comfortable width that does
   not depend on the wand next to it (it may overlap a big wand's box: hide it
   to uncover the slots). Click the title (or press **Home**) to hide it down to

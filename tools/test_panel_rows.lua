@@ -629,6 +629,38 @@ do
 		labels({ kind = "leaf", id = "LIGHT_BULLET", atype = "PROJECTILE",
 			modifiers = { "DIVIDE_10", "DIVIDE_10", "DIVIDE_4" }, runs = 400 })[1],
 		"[D10 x2, D4] Light Bullet  x400")
+	-- A chain with Damage Plus cards between the Divide By cards: one D<product>,
+	-- and the other modifiers counted by name over the whole chain.
+	local chain = { kind = "leaf", id = "LIGHT_BULLET", atype = "PROJECTILE",
+		modifiers = { "DIVIDE_10", "DIVIDE_10", "DIVIDE_4", "DAMAGE", "DAMAGE", "DIVIDE_2", "DAMAGE" },
+		divided = true, divisor = 800, runs = 800,
+		divider_at = { [1] = true, [2] = true, [3] = true, [6] = true },
+		link_runs = { [4] = 400, [5] = 400, [7] = 800 } }
+	eq("compact: a Divide By chain collapses to one D<product>",
+		labels(chain)[1], "[D800, Damage x1600] Light Bullet")
+	eq("full: the same chain reads Divide by <product>",
+		(function()
+			local sim = { casts = { { nodes = { chain }, wrapped = false, mana = 0 } }, wrapped = false }
+			for _, r in ipairs(T.sim_rows(sim, { spells_per_cast = 1 }, {})) do
+				if not r.sticky then return r.label end
+			end
+		end)(), "[Divide by 800, Damage x1600] Light Bullet")
+
+	-- hide_legend drops the rows that only decode symbols
+	do
+		local function sticky_count(hide)
+			local sim = { casts = { { nodes = { { kind = "leaf", id = "LIGHT_BULLET", atype = "PROJECTILE",
+				modifiers = {}, children = {} } }, wrapped = false, mana = 0 } }, wrapped = false }
+			local n = 0
+			for _, r in ipairs(T.sim_rows(sim, { spells_per_cast = 1 }, {}, nil, true, hide)) do
+				if r.sticky then n = n + 1 end
+			end
+			return n
+		end
+		eq("legend rows are shown unless hidden", sticky_count(false) > sticky_count(true), true)
+		eq("...and hidden means none of them", sticky_count(true), 0)
+	end
+
 	eq("compact: a multicast is x<n>",
 		labels({ kind = "multicast", id = "BURST_3", atype = "DRAW_MANY", group = 3 })[1], "x3")
 

@@ -142,6 +142,16 @@ check("ALPHA as the first card copies itself (the engine's own recursion)",
 
 -- DIVIDE_* invoke deck[1] directly (no draw_actions call) -> they chain like
 -- a modifier prefix, firing WITH the next card in the same cast.
+do
+	local sim = simulate({ "DIVIDE_10", "DIVIDE_4", "DIVIDE_2", "LIGHT_BULLET" })
+	local node = sim.casts[1] and sim.casts[1].nodes[1]
+	passck("a Divide By chain reports its product as the divisor",
+		node and node.divisor == 80 and node.runs == 80, " (" .. tostring(node and node.divisor) .. ")")
+	local lone = simulate({ "DIVIDE_2", "DIVIDE_2", "DAMAGE", "LIGHT_BULLET" }).casts[1].nodes[1]
+	passck("a chain whose target ran only once keeps listing its cards", lone.divisor == nil)
+	passck("...and which modifiers are the Divide By cards",
+		node and node.divider_at[1] and node.divider_at[2] and node.divider_at[3] and not node.divider_at[4])
+end
 check("DIVIDE re-runs the next card: a prefix on it, with the exact run count",
 	{ "DIVIDE_2", "LIGHT_BULLET" }, 1,
 	"{[DIVIDE_2]LIGHT_BULLET:*2}")

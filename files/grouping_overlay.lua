@@ -320,6 +320,7 @@ WORDS.full = {
 		end
 		return out
 	end,
+	divisor = function(n) return "Divide by " .. n end,
 	dangling = "  (no projectile)",
 	divides_nothing = "  (nothing to repeat)",
 	silent = function(n) return " (" .. n .. " draw nothing)" end,
@@ -354,6 +355,7 @@ WORDS.compact = {
 		if sources and #sources > 0 then out = out .. " @" .. table.concat(sources, ",") end
 		return out
 	end,
+	divisor = function(n) return "D" .. n end,
 	dangling = " (none)",
 	divides_nothing = " (none)",
 	silent = function(n) return " (" .. n .. " silent)" end,
@@ -381,8 +383,39 @@ WORDS.compact = {
 -- Divide By runs the card after it several times, and chained Divide By cards
 -- of the same size read better as a count than as a stutter.  `link_runs`
 -- (wand_structure.lua) says how often a modifier was re-run.
+-- A Divide By chain read as what it adds up to.  "Divide by 10, Divide by 4,
+-- Damage Plus x2, Divide by 10, ..." is the engine's bookkeeping, not what the
+-- player thinks: the chain runs its target `divisor` times.  So every Divide By
+-- becomes ONE entry (at the place of the first) and every other modifier is
+-- counted by name across the whole chain, however the Divide By cards
+-- interleave with it.
+local function divided_names(node, rows, words)
+	local mods, names = node.modifiers or {}, {}
+	local count, order = {}, {}
+	local divisor_placed = false
+	for i, id in ipairs(mods) do
+		if node.divider_at[i] then
+			if not divisor_placed then order[#order + 1] = false end   -- false = the Divide By entry
+			divisor_placed = true
+		else
+			if not count[id] then order[#order + 1] = id; count[id] = 0 end
+			count[id] = count[id] + ((node.link_runs and node.link_runs[i]) or 1)
+		end
+	end
+	for _, id in ipairs(order) do
+		if id == false then
+			names[#names + 1] = words.divisor(node.divisor or 1)
+		else
+			local name = dyn_name(id, rows, node.uncertain_ids, words.name)
+			names[#names + 1] = count[id] > 1 and (name .. " x" .. count[id]) or name
+		end
+	end
+	return names
+end
+
 local function modifier_names(node, rows, words)
 	local mods, names = node.modifiers or {}, {}
+	if node.divider_at then return divided_names(node, rows, words) end
 	local i = 1
 	while i <= #mods do
 		local count = (node.link_runs and node.link_runs[i]) or 1
@@ -435,7 +468,9 @@ local function walk(rows, node, ancestor_colors, depth, words)
 	if node.dangling then
 		label = label .. (node.divides_nothing and words.divides_nothing or words.dangling)
 	end
-	if node.runs then
+	if node.runs and node.divisor and not node.silent_runs then
+		-- already said by the "Divide by N" entry above
+	elseif node.runs then
 		label = label .. "  x" .. node.runs
 		if node.silent_runs then label = label .. words.silent(node.silent_runs) end
 	end
@@ -501,9 +536,11 @@ end
 -- Rows for the whole simulation: per-cast headers (when there is more than one
 -- cast, a wrap, or a cast that can never afford itself), the trees, a loud
 -- wrap/recharge banner, and the sticky footnotes ("?" tiers, mana overflow,
--- the bracket-definition legend). `uncertain_ids` are the cards whose
+-- the bracket-definition legend). `hide_legend` drops the rows that only decode
+-- a symbol (the compact key, "[ ]", the generic "?", "mana"); the warning that
+-- names the uncertain cards stays.  `uncertain_ids` are the cards whose
 -- behaviour the engine had to guess (wand_structure.uncertain_ids); nil is fine.
-local function sim_rows(sim, cfg, always, uncertain_ids, compact)
+local function sim_rows(sim, cfg, always, uncertain_ids, compact, hide_legend)
 	local rows = {}
 	local words = compact and WORDS.compact or WORDS.full
 	if sim.error then
@@ -573,23 +610,23 @@ local function sim_rows(sim, cfg, always, uncertain_ids, compact)
 			rows[#rows + 1] = { bars = {},
 				label = "? = " .. table.concat(names, ", ") .. ": structure uncertain",
 				color = COLOR.OTHER, sticky = true }
-		else
+		elseif not hide_legend then
 			rows[#rows + 1] = { bars = {}, label = "? = depends on game state when cast",
 				color = COLOR.OTHER, sticky = true }
 		end
 	end
-	if any_over then
+	if any_over and not hide_legend then
 		rows[#rows + 1] = { bars = {},
 			label = "mana = cost of this cast; > max means part of it is discarded",
 			color = COLOR.OTHER, sticky = true }
 	end
 	-- the compact shorthand needs a key, but only when a symbol is on screen
-	if compact and (rows.any_recast or rows.any_symbol) then
+	if compact and not hide_legend and (rows.any_recast or rows.any_symbol) then
 		rows[#rows + 1] = { bars = {}, label = words.legend, color = COLOR.OTHER, sticky = true }
 	end
 	-- the bracket-definition legend (Track B, docs/ADVANCED_SCENARIOS_PLAN.md
 	-- 1): always present whenever there's at least one cast to explain.
-	if #sim.casts > 0 then
+	if #sim.casts > 0 and not hide_legend then
 		rows[#rows + 1] = { bars = {}, label = "[ ] = spells this card pulls from the wand",
 			color = COLOR.OTHER, sticky = true }
 	end
@@ -1980,6 +2017,7 @@ function M.update()
 	-- bracket on it); OFF pretends every card fires.
 	local ignore_depleted = get("spell_bracket_visualizer.ignore_depleted_spells") ~= false
 	local compact_text = get("spell_bracket_visualizer.compact_panel") == true
+	local hide_legend = get("spell_bracket_visualizer.show_legend") ~= true
 	local panel_scale = PANEL_SCALE_MAP[get("spell_bracket_visualizer.panel_text_size") or "small"] or 0.6
 	-- Track C: "hide" (default) withholds slot brackets on a wand whose tier
 	-- is worse than exact; "show" draws them anyway. See draw_box_brackets.
@@ -2050,7 +2088,7 @@ function M.update()
 			if key_pressed(KEY_PAGEUP) then panel_view.scroll = panel_view.scroll - SCROLL_STEP end
 			if key_pressed(KEY_HOME) then panel_view.hidden = not panel_view.hidden end
 			panel_view.mouse = read_pointer(sw, sh)
-			draw_panel(gui, sim_rows(wd.sim, wd.cfg, wd.always, wd.uncertain_ids, compact_text),
+			draw_panel(gui, sim_rows(wd.sim, wd.cfg, wd.always, wd.uncertain_ids, compact_text, hide_legend),
 				title, sw, sh, anchor, panel_scale, panel_view)
 		end
 	end

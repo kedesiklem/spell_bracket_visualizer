@@ -26,6 +26,13 @@ mod_settings = {
 		scope = MOD_SETTING_SCOPE_RUNTIME,
 	},
 	{
+		id = "show_legend",
+		ui_name = "Wand Structure Panel: Legend",
+		ui_description = "Show the explanatory lines at the bottom of the panel (what [ ],\n? and the mana line mean, and the key to the compact text's\nsymbols). Off by default: warnings about uncertain spells stay.",
+		value_default = false,
+		scope = MOD_SETTING_SCOPE_RUNTIME,
+	},
+	{
 		id = "show_slot_brackets",
 		ui_name = "Slot Brackets",
 		ui_description = "Rainbow nesting brackets on the spell cards in the wand UI,\nlike nested code brackets: each group's span, and wand\nwrapping in orange.",
