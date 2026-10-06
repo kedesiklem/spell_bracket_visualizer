@@ -14,9 +14,8 @@
 -- talks to this object and never to the sandbox directly.
 --
 -- Public API
---   M.new(host_dofile, world) -> engine | nil, error_message
---     host_dofile(path)   runs a game file with the global table as environment
---                         (see game_env.lua)
+--   M.new(host, world) -> engine | nil, error_message
+--     host    nil in the game; offline tools pass { dofile = ... } (see game_env.lua)
 --     world               optional game-state overrides (see engine_stubs.lua)
 --   engine.run(wand)            -> result   (see wand_runner.lua)
 --   engine.action_type(id)      -> "PROJECTILE" | "MODIFIER" | ... | nil
@@ -24,7 +23,7 @@
 --   engine.name_key(id)         -> string|nil   the "$action_..." text key
 --   engine.spell_count()        -> number
 --   M.new_in_game(world)        -> engine | nil, error_message
---                                  M.new fed from the game's own `dofile`
+--                                  M.new with the game's own `dofile`
 
 local MOD = "mods/spell_bracket_visualizer/files/engine/"
 local game_env = dofile_once(MOD .. "game_env.lua")
@@ -33,8 +32,8 @@ local wand_runner = dofile_once(MOD .. "wand_runner.lua")
 
 local M = {}
 
-function M.new(host_dofile, world)
-	local game, err = game_env.new(host_dofile, world)
+function M.new(host, world)
+	local game, err = game_env.new(host, world)
 	if not game then return nil, err end
 
 	-- The tracer hooks the sandbox's functions, so it is attached -- and the
@@ -65,7 +64,7 @@ function M.new(host_dofile, world)
 end
 
 function M.new_in_game(world)
-	return M.new(game_env.game_dofile(), world)
+	return M.new(nil, world)
 end
 
 return M

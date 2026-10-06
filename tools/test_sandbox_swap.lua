@@ -5,7 +5,8 @@
 --
 -- The swap is what keeps the game's cast code away from the live game, so it
 -- is checked head on: real globals must come back exactly (even after an
--- error), nothing the sandbox defines may leak out, and nothing real may leak in.
+-- error), nothing the sandbox defines may leak out, and no real engine function
+-- (a CamelCase global) may be reachable from inside.
 
 local here = arg[0]:match("^(.*)[/\\]") or "."
 local support = dofile(here .. "/test_support.lua")
@@ -32,11 +33,13 @@ end
 -- A real "engine function" that must never be reached from inside the sandbox.
 local reached = false
 SECRET_ENGINE_CALL = function() reached = true end
-REAL_ONLY_VALUE = 123
+
+-- a lowercase helper stands in for Noita's own `dofile` internals (e.g. __loaded)
+__internal_helper = function() return "still here" end
 
 local game_env = dofile_once("mods/spell_bracket_visualizer/files/engine/game_env.lua")
 local before = snapshot()
-local game = assert(game_env.new(support.gun_ref_dofile()))
+local game = assert(game_env.new({ dofile = support.gun_ref_dofile() }))
 
 eq("building the sandbox leaves the real globals untouched",
 	(same_globals(before, snapshot())), true)
@@ -45,15 +48,14 @@ eq("...nor its spell table", rawget(_G, "actions"), nil)
 
 local seen = game.run(function()
 	local out = {
-		load = rawget(_G, "load"), io = rawget(_G, "io"), os = rawget(_G, "os"),
-		real_only = rawget(_G, "REAL_ONLY_VALUE"), actions = #rawget(_G, "actions"),
+		helper = rawget(_G, "__internal_helper")(),
+		actions = #rawget(_G, "actions"),
 	}
 	SECRET_ENGINE_CALL()
 	return out
 end)
 eq("inside: the sandbox holds the game's spells", seen.actions > 100, true)
-eq("inside: no load, io or os", seen.load == nil and seen.io == nil and seen.os == nil, true)
-eq("inside: real-only globals are invisible", seen.real_only, nil)
+eq("inside: lowercase internals (what dofile needs) stay available", seen.helper, "still here")
 eq("inside: an engine call does NOT reach the real function", reached, false)
 eq("inside: ...it is counted as unknown instead", game.report.unknown.SECRET_ENGINE_CALL, 1)
 eq("after a run the real globals are back exactly",

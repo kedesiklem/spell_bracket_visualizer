@@ -70,7 +70,7 @@ function M.new_engine(world)
 			.. "Run:  python3 tools/extract_gun.py            (reads your data.wak)\n", 0)
 	end
 	local engine_module = dofile_once(MOD_PREFIX .. "files/engine/engine.lua")
-	local engine, err = engine_module.new(M.gun_ref_dofile(), world)
+	local engine, err = engine_module.new({ dofile = M.gun_ref_dofile() }, world)
 	if not engine then error("engine failed to start: " .. tostring(err), 0) end
 	return engine
 end

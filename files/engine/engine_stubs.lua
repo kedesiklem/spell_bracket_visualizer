@@ -238,16 +238,30 @@ function M.install(env, world_overrides)
 	return report
 end
 
+--- A stand-in for one engine function the sandbox does not model: it does
+-- nothing, but every CALL is counted, so a wand whose structure may depend on it
+-- is flagged.  One closure per name, shared by every user of the report.
+function M.neutral_call(report, name)
+	report.neutral_ = report.neutral_ or {}
+	local fn = report.neutral_[name]
+	if fn == nil then
+		fn = function()
+			report.unknown[name] = (report.unknown[name] or 0) + 1
+			report.events = report.events + 1
+		end
+		report.neutral_[name] = fn
+	end
+	return fn
+end
+
 --- Metatable `__index` for the sandbox: any capitalised name the cast code
--- uses that is not modelled above is an engine call we do not understand.  It
--- is counted, and answered with a no-op.  (A lowercase unknown name is a bug in
--- the sandbox, not an engine call, so it still reads as nil.)
+-- uses that is not defined at all is an engine call we do not understand.  It is
+-- answered with a counting no-op.  (A lowercase unknown name is a bug in the
+-- sandbox, not an engine call, so it still reads as nil.)
 function M.unknown_call_handler(env, report)
 	return function(_, key)
 		if type(key) == "string" and key:match("^%u") then
-			report.unknown[key] = (report.unknown[key] or 0) + 1
-			report.events = report.events + 1
-			local noop = function() end
+			local noop = M.neutral_call(report, key)
 			rawset(env, key, noop)
 			return noop
 		end
