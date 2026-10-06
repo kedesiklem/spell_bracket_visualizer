@@ -64,6 +64,8 @@ function M.new(host, world)
 	--- Tell the sandbox what the live game currently looks like (live_world.lua).
 	-- Fields given are treated as known; see engine_stubs.lua.
 	function engine.set_world(values) game.report.set_world(values) end
+	--- Where the sandbox's ModSettingGet gets its answers (live_world.setting).
+	function engine.set_setting_reader(reader) game.report.set_setting_reader(reader) end
 	--- Is a result's recorded world dependency list still true?  A cached
 	-- simulation is reusable exactly when this holds.
 	function engine.deps_hold(deps)

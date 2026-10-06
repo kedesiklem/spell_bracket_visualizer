@@ -58,6 +58,7 @@ local function reset_report(report)
 	for k in pairs(report.world_reads) do report.world_reads[k] = nil end
 	report.random_used = false
 	report.events = 0
+	report.failures = {}
 	report.begin_run()   -- fresh fake player, Globals store and dependency record
 end
 
@@ -135,8 +136,13 @@ function M.run(env, tracer, report, wand)
 	-- `deps` lists the world values the cast code consulted (known or not), so
 	-- a cached result can be dropped exactly when one of them changes.
 	local result = { casts = casts, deps = report.deps }
+	-- Errors the tracer contained (a spell body or draw_shot that threw).
+	if #report.failures > 0 then
+		result.problems = report.failures
+		uncertain.failed = #report.failures
+	end
 	if uncertain.random or count_keys(uncertain.world) > 0
-		or count_keys(uncertain.unknown) > 0 then
+		or count_keys(uncertain.unknown) > 0 or uncertain.failed then
 		result.uncertain = uncertain
 	end
 	return result

@@ -32,6 +32,7 @@ local function ensure_engine()
 	local ok, built, err = pcall(engine_module.new_in_game)
 	if ok and built then
 		engine = built
+		engine.set_setting_reader(live_world.setting)
 		sim_cache = wand_sim_cache.new(function(wand)
 			return wand_structure.simulate(engine, wand)
 		end, nil, function(sim) return engine.deps_hold(sim.deps) end)
@@ -1808,6 +1809,9 @@ local function draw_debug_info(gui, sw, sh, wd, per_row)
 			"uncertain=%s (%s)", wd.uncertain and "yes" or "no",
 			table.concat(wd.uncertain_ids or {}, ", "))
 		if wd.sim and wd.sim.error then lines[#lines + 1] = "engine: " .. wd.sim.error end
+		for _, problem in ipairs(wd.sim and wd.sim.problems or {}) do
+			lines[#lines + 1] = "error: " .. problem
+		end
 		-- What exactly the engine had to guess (the usual reason brackets are hidden).
 		local guesses = wd.sim and wd.sim.uncertain
 		if guesses then

@@ -669,7 +669,7 @@ function M.simulate(engine, wand)
 
 	local ctx = { engine = engine, tokens = wand.tokens }
 	local sim = { casts = {}, wrapped = false, uncertain = result.uncertain,
-		deps = result.deps }
+		deps = result.deps, problems = result.problems }
 	for _, traced in ipairs(result.casts) do
 		local cast = build_cast(ctx, traced)
 		sim.casts[#sim.casts + 1] = cast

@@ -40,6 +40,7 @@ local first_component = EntityGetFirstComponent
 local component_value = ComponentGetValue2
 local get_transform = EntityGetTransform
 local globals_get = GlobalsGetValue
+local setting_get = ModSettingGet
 
 local ENEMY_RADIUS, ENEMY_TAG = 240, "homing_target"
 local PROJECTILE_RADIUS, PROJECTILE_TAG = 160, "projectile"
@@ -70,6 +71,15 @@ local function read_player(out)
 	local x, y = get_transform(player)
 	out.n_enemies = count_near(x, y, ENEMY_RADIUS, ENEMY_TAG)
 	out.n_projectiles = count_near(x, y, PROJECTILE_RADIUS, PROJECTILE_TAG)
+end
+
+--- One mod setting, read for real (nil when absent or the API is missing).
+-- Used by the sandbox's ModSettingGet; settings only ever change between
+-- frames, so the engine's dependency check notices a changed one.
+function M.setting(key)
+	if not setting_get then return nil end
+	local ok, value = pcall(setting_get, key)
+	if ok then return value end
 end
 
 function M.read()

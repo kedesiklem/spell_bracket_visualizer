@@ -236,6 +236,12 @@ function M.attach(env, report)
 	-- by another card (Divide By, Greek letters) still knows which slot it is.
 	local raw_body = setmetatable({}, { __mode = "k" })   -- wrapper -> original
 
+	local function note_failure(where, err)
+		if report and report.failures then
+			report.failures[#report.failures + 1] = tostring(where) .. ": " .. tostring(err)
+		end
+	end
+
 	local function run_action(card, body, ...)
 		local via = "direct"
 		if announced == card then
@@ -257,7 +263,15 @@ function M.attach(env, report)
 		-- Action bodies return nothing, except Divide By's iteration count.
 		local ok, result = pcall(body, ...)
 		close(node)
-		if not ok then error(result, 0) end
+		if not ok then
+			-- A spell body that throws (a mod's bug, or an engine call the sandbox
+			-- cannot answer) must not take the whole wand down with it.  The card
+			-- is marked uncertain, the failure is reported, and the cast goes on
+			-- as if the card had done nothing.
+			node.uncertain, node.error = true, tostring(result)
+			note_failure(card.id, result)
+			return nil
+		end
 		if result ~= nil then node.divides = true end
 		return result
 	end
@@ -326,9 +340,17 @@ function M.attach(env, report)
 			trigger_frames = pending_trigger and pending_trigger.frames or nil,
 		})
 		pending_trigger = nil
+		-- Mods may replace draw_shot (SpellPerformance does) and swap `c` while
+		-- it runs; if their version throws half-way, put the state back so the
+		-- rest of the cast is not computed with a stranger's modifiers.
+		local c_before = env.c
 		local ok, err = pcall(real_draw_shot, shot, instant)
 		close(node)
-		if not ok then error(err, 0) end
+		if not ok then
+			env.c = c_before
+			node.error = tostring(err)
+			note_failure("draw_shot", err)
+		end
 	end
 	env.BeginTriggerTimer = function(frames) pending_trigger = { kind = "timer", frames = frames } end
 	env.BeginTriggerHitWorld = function() pending_trigger = { kind = "hit_world" } end

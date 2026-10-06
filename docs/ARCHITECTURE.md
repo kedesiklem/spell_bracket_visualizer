@@ -149,6 +149,27 @@ in the panel, and the wand's slot brackets are hidden by default (setting:
 Radii are the one approximation: the sandbox counts per tag, so `live_world.lua`
 measures the radii vanilla uses (240 px enemies, 160 px projectiles).
 
+## Other mods inside the sandbox
+
+Mods replace parts of `gun.lua` (SpellPerformance swaps `draw_shot`) and add
+spells, and their code was never written with a sandbox in mind. Three rules
+keep one mod's quirk from blanking every wand:
+
+- **Engine calls return one value, always.** A neutralised call returns an
+  explicit `nil`. A bare `return` yields *zero* values, and `tonumber(f())`
+  throws on zero values although it accepts a single `nil` -- which is what the
+  real game gives for an unset setting. That difference was the
+  SpellPerformance failure.
+- **Settings are read, not guessed.** `ModSettingGet` is configuration, so it is
+  forwarded to the real game (`live_world.setting`, read-only). The key is
+  recorded as a dependency (`setting:<key>`), so changing a setting in the mod
+  menu recomputes the wand. An unset key stays a guess.
+- **Errors are contained per card.** A spell body or a `draw_shot` that throws is
+  caught by the tracer: the card is marked uncertain, the message goes to
+  `result.problems` (shown as `error:` lines in the debug box), `c` is restored
+  after a failed `draw_shot`, and the cast carries on. Only a failure of the
+  harness itself still reads "cannot simulate".
+
 ## Running the tests
 
 ```
@@ -157,6 +178,7 @@ texlua tools/test_wand_structure.lua    # or any Lua 5.1+ / LuaJIT
 texlua tools/test_slot_delims.lua
 texlua tools/test_panel_rows.lua
 texlua tools/test_live_world.lua
+texlua tools/test_mod_robustness.lua   # third-party mod quirks
 ```
 
 `.gun_ref/` holds Nolla's game files: it is git-ignored and never ships.

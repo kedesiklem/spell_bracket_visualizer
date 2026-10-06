@@ -170,7 +170,22 @@ function M.install(env, world_values)
 
 	--- The value the sandbox currently holds for a world field (nil for the
 	-- "globals:" / "component:" pseudo-fields that never have a real value).
-	function report.world_value(field) return world[field] end
+	function report.world_value(field)
+		local key = type(field) == "string" and field:match("^setting:(.*)$")
+		if key then return report.read_setting(key) end
+		return world[field]
+	end
+
+	--- Reader for the player's mod settings (live_world.setting); nil = none.
+	-- Settings are configuration, not world state: a mod such as
+	-- SpellPerformance branches on them inside its own gun.lua override.
+	function report.set_setting_reader(reader) report.setting_reader = reader end
+	function report.read_setting(key)
+		local reader = report.setting_reader
+		if not reader then return nil end
+		local ok, value = pcall(reader, key)
+		if ok then return value end
+	end
 
 	--- Note that the cast code consulted world field `field`.  Returns nothing;
 	-- a read of an unsupplied field is a guess and bumps the event counter.
@@ -195,6 +210,22 @@ function M.install(env, world_values)
 
 	report.set_world(world_values)
 	report.begin_run()
+
+	-- ModSettingGet: answered from the real settings when a reader is wired,
+	-- and recorded as a dependency so a changed setting recomputes the wand.
+	-- An unreadable key is a guess (counted), and is returned as an EXPLICIT
+	-- nil: `tonumber(ModSettingGet(k))` throws when the call yields no value
+	-- at all, but accepts one nil -- which is what the real game hands back for
+	-- a setting that was never saved.
+	env.ModSettingGet = function(key)
+		local value = report.read_setting(key)
+		report.deps["setting:" .. tostring(key)] = value
+		if value == nil then
+			report.world_reads["setting:" .. tostring(key)] = 1
+			report.events = report.events + 1
+		end
+		return value
+	end
 
 	for _, name in ipairs(NOOP) do env[name] = function() end end
 
@@ -302,6 +333,9 @@ function M.neutral_call(report, name)
 		fn = function()
 			report.unknown[name] = (report.unknown[name] or 0) + 1
 			report.events = report.events + 1
+			-- Explicit nil, not a bare return: callers that wrap the result in
+			-- tonumber()/tostring()/ipairs() must see one (nil) value.
+			return nil
 		end
 		report.neutral_[name] = fn
 	end
