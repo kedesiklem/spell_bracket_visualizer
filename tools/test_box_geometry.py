@@ -64,10 +64,10 @@ META_ANCHORS = [
     ("data/items_gfx/handgun.xml",   8),
     ("data/items_gfx/bomb_wand.xml", 8),
 ]
-# (sprite key, measured box_h [u], measured row_top [u], tol). Middle-click 2026-06-19.
+# (sprite key, measured box_h [u], measured row_top [u], tol). box_h: middle-click 2026-06-19; row_top: pixel read of a screenshot 2026-10-07.
 OVERRIDE_ANCHORS = [
-    ("data/items_gfx/handgun.xml",   36.9, 21.9, 0.2),
-    ("data/items_gfx/bomb_wand.xml", 36.9, 21.9, 0.2),
+    ("data/items_gfx/handgun.xml",   36.9, 21.25, 0.2),
+    ("data/items_gfx/bomb_wand.xml", 36.9, 21.25, 0.2),
 ]
 
 

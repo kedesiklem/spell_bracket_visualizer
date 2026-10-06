@@ -1168,12 +1168,16 @@ end
 -- row_top ~22.2.) Leave empty until a specific wand actually misbehaves.
 local SPRITE_OVERRIDES = {
 	-- Starter wands (seen every run) draw an XML sprite with offset_y=3, so the
-	-- slot row sits ~0.6u lower than the thickness model predicts. gen_wand_sprite_meta
-	-- now keys these on png height (h=8) which nails box_h; these measured values
-	-- (middle-click, 2026-06-19: box top->bottom = 36.9u, box top->row top = 21.9u)
-	-- also pin the row exactly. Same sprite on both starters -> identical numbers.
-	["data/items_gfx/handgun.xml"]   = { box_h = 36.9, row_top = 21.9 },
-	["data/items_gfx/bomb_wand.xml"] = { box_h = 36.9, row_top = 21.9 },
+	-- slot row sits lower than the thickness model predicts.  gen_wand_sprite_meta
+	-- keys these on png height (h=8), which nails box_h (36.9u, middle-click
+	-- 2026-06-19); the same sprite on both starters gives identical numbers.
+	-- row_top is the CARD's outer top edge below the box top, the same reference
+	-- the thickness model uses for every other wand.  The first measurement
+	-- (21.9u) was taken to the inside of the frame and left the starter wands'
+	-- brackets 3px low; a pixel read of a debug screenshot (2026-10-07) gives
+	-- 102px = 21.25u for the starter against 96px = 20.0u for an h7 wand.
+	["data/items_gfx/handgun.xml"]   = { box_h = 36.9, row_top = 21.25 },
+	["data/items_gfx/bomb_wand.xml"] = { box_h = 36.9, row_top = 21.25 },
 }
 
 -- Returns the wand art's w+h (drives the box-height model) AND its sprite path
