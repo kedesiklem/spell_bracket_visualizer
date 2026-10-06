@@ -17,6 +17,7 @@ local wand_structure = dofile_once("mods/spell_bracket_visualizer/files/wand_str
 local wand_sim_cache = dofile_once("mods/spell_bracket_visualizer/files/wand_sim_cache.lua")
 local slot_marks = dofile_once("mods/spell_bracket_visualizer/files/slot_marks.lua")
 local engine_module = dofile_once("mods/spell_bracket_visualizer/files/engine/engine.lua")
+local live_world = dofile_once("mods/spell_bracket_visualizer/files/engine/live_world.lua")
 
 -- The cast engine (files/engine/): the game's own gun.lua, run in a sandbox.
 -- Built on the first update() rather than at load time, because it snapshots
@@ -33,7 +34,7 @@ local function ensure_engine()
 		engine = built
 		sim_cache = wand_sim_cache.new(function(wand)
 			return wand_structure.simulate(engine, wand)
-		end)
+		end, nil, function(sim) return engine.deps_hold(sim.deps) end)
 	else
 		engine_error = tostring(ok and err or built)
 	end
@@ -1761,6 +1762,9 @@ function M.update()
 	local per_row = wrap_columns(sw, sh)
 	-- First frame only: build the cast engine now that every mod's spells exist.
 	ensure_engine()
+	-- What the "If ..." spells check (HP, enemies nearby, every-other toggle...)
+	-- is read from the live game once per frame, so those wands stay certain.
+	if engine then engine.set_world(live_world.read()) end
 	local boxes = collect_wand_boxes(gui, refw, per_row, ignore_depleted)
 
 	if show_slots then -- brackets on every wand box (independent of active wand)

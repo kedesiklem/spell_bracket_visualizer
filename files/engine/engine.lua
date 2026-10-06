@@ -56,6 +56,17 @@ function M.new(host, world)
 	function engine.run(wand)
 		return game.run(wand_runner.run, game.env, tracer, game.report, wand)
 	end
+	--- Tell the sandbox what the live game currently looks like (live_world.lua).
+	-- Fields given are treated as known; see engine_stubs.lua.
+	function engine.set_world(values) game.report.set_world(values) end
+	--- Is a result's recorded world dependency list still true?  A cached
+	-- simulation is reusable exactly when this holds.
+	function engine.deps_hold(deps)
+		for field, value in pairs(deps or {}) do
+			if game.report.world_value(field) ~= value then return false end
+		end
+		return true
+	end
 	function engine.action_type(id) return tracer.action_type(id) end
 	function engine.knows(id) return known[id] == true end
 	function engine.name_key(id) return name_keys[id] end

@@ -124,6 +124,7 @@ files/engine/                   # runs the game's own gun.lua in a sandbox
   engine.lua                    #   single entry point
   game_env.lua                  #   the sandbox + game file loader
   engine_stubs.lua              #   fake Noita API / world, uncertainty report
+  live_world.lua                #   reads HP, enemies... from the live game
   cast_tracer.lua               #   records each cast as a tree of nodes
   wand_runner.lua               #   the protocol for firing a wand
   lua_compat.lua                #   LuaJIT / Lua 5.3 differences (unpack)

@@ -63,7 +63,8 @@ shown as a re-cast child (`again: ... xN`), not as part of a bracket.
 | --- | --- |
 | `engine.lua` | The only entry point: wires the four pieces below and exposes `run`, `knows`, `name_key`, `action_type`. |
 | `game_env.lua` | The sandbox. Noita exposes no `load`/`loadstring`, so (like WandDBG) the cast code runs in the global table, which is OVERLAID for the duration of each call: every CamelCase function (the engine API) is replaced by a counting no-op, the sandbox's own state is applied, and afterwards everything is restored exactly (even after an error). The cast code never reaches a real engine function; Lua's own functions and Noita's `dofile` internals stay available. |
-| `engine_stubs.lua` | Stand-ins for the Noita API that spell bodies call: no-ops, a fake player/world for the reads that steer drawing, a deterministic RNG, and a report of everything that had to be guessed. |
+| `engine_stubs.lua` | Stand-ins for the Noita API that spell bodies call: no-ops, a fake player/world for the reads that steer drawing, a deterministic RNG, and a report of everything that had to be guessed (reads of values nobody supplied) plus the values each run depended on. |
+| `live_world.lua` | Reads the state the conditional spells check (HP, wallet, nearby enemies/projectiles, every-other toggle) from the LIVE game, read-only and outside the sandbox, so those spells are answered truthfully instead of guessed. |
 | `cast_tracer.lua` | Hooks around `gun.lua` that record each cast as a tree of nodes (spans of removed slots, wraps, cleared decks, uncertainty). Pure observation; it changes nothing. |
 | `wand_runner.lua` | The protocol for operating `gun.lua` from outside (load deck, start shot, play always-casts, draw, reload), repeated until the wand recharges. |
 | `lua_compat.lua` | The one place LuaJIT (the game) and Lua 5.3+ (offline tools) differ: `unpack`. |
@@ -95,11 +96,25 @@ shown as a re-cast child (`again: ... xN`), not as part of a bracket.
 
 ## Uncertainty
 
-The sandbox's world is fake (no enemies nearby, full health, a fixed random
-sequence). A card whose body read game state, drew a random number, or called
-an engine function the sandbox does not model is marked **uncertain**: its name
-gets a `?` in the panel, and the wand's slot brackets are hidden by default
-(setting: *Uncertain Wands*). Everything else is exactly what the engine does.
+The conditional spells (If HP, If enemies, Every Other...) branch on game state,
+so the sandbox needs a world to answer from. Each value in it is either
+
+- **known**: `live_world.lua` read it from the running game (HP, wallet, enemies
+  and projectiles nearby, the every-other toggle). Reading a known value is not a
+  guess, so the wand stays certain; the structure shown is the one the game would
+  produce *right now*. The value is recorded on the result (`deps`), and the
+  simulation cache recomputes the wand as soon as a value it consulted changes
+  (and only then); or
+- **guessed**: nobody supplied it, so it sits at a default (full health, nothing
+  nearby...). Reading it counts as a guess.
+
+A card whose body made a guess, drew a random number, or called an engine
+function the sandbox does not model is marked **uncertain**: its name gets a `?`
+in the panel, and the wand's slot brackets are hidden by default (setting:
+*Uncertain Wands*). State the sandbox owns itself (what a spell wrote with
+`GlobalsSetValue` earlier in the same run) is bookkeeping and never a guess.
+Radii are the one approximation: the sandbox counts per tag, so `live_world.lua`
+measures the radii vanilla uses (240 px enemies, 160 px projectiles).
 
 ## Running the tests
 
@@ -108,6 +123,7 @@ python3 tools/extract_gun.py            # once: needs your Noita install
 texlua tools/test_wand_structure.lua    # or any Lua 5.1+ / LuaJIT
 texlua tools/test_slot_delims.lua
 texlua tools/test_panel_rows.lua
+texlua tools/test_live_world.lua
 ```
 
 `.gun_ref/` holds Nolla's game files: it is git-ignored and never ships.

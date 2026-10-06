@@ -31,6 +31,7 @@ payload=(
 	files/slot_marks.lua
 	files/engine/lua_compat.lua
 	files/engine/engine_stubs.lua
+	files/engine/live_world.lua
 	files/engine/game_env.lua
 	files/engine/cast_tracer.lua
 	files/engine/wand_runner.lua

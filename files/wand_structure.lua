@@ -24,6 +24,7 @@
 --
 -- OUTPUT  { casts = { cast... }, wrapped = bool,       -- any cast wrapped
 --           uncertain = { random, world, unknown },    -- see wand_runner.lua
+--           deps = { field = value },   -- world values the cast read (engine_stubs.lua)
 --           shuffle = true }                           -- nothing to show
 --         | { error = "message", casts = {} }
 --
@@ -446,7 +447,8 @@ function M.simulate(engine, wand)
 	if result.shuffle then return { shuffle = true, casts = {} } end
 
 	local ctx = { engine = engine, tokens = wand.tokens }
-	local sim = { casts = {}, wrapped = false, uncertain = result.uncertain }
+	local sim = { casts = {}, wrapped = false, uncertain = result.uncertain,
+		deps = result.deps }
 	for _, traced in ipairs(result.casts) do
 		local cast = build_cast(ctx, traced)
 		sim.casts[#sim.casts + 1] = cast

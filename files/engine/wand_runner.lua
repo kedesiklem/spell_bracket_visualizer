@@ -57,6 +57,8 @@ local function reset_report(report)
 	for k in pairs(report.unknown) do report.unknown[k] = nil end
 	for k in pairs(report.world_reads) do report.world_reads[k] = nil end
 	report.random_used = false
+	report.events = 0
+	report.begin_run()   -- fresh fake player, Globals store and dependency record
 end
 
 local function snapshot_report(report)
@@ -130,7 +132,9 @@ function M.run(env, tracer, report, wand)
 	end
 
 	local uncertain = snapshot_report(report)
-	local result = { casts = casts }
+	-- `deps` lists the world values the cast code consulted (known or not), so
+	-- a cached result can be dropped exactly when one of them changes.
+	local result = { casts = casts, deps = report.deps }
 	if uncertain.random or count_keys(uncertain.world) > 0
 		or count_keys(uncertain.unknown) > 0 then
 		result.uncertain = uncertain

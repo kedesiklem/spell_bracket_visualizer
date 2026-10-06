@@ -370,6 +370,64 @@ local ids = S.uncertain_ids(sim)
 passck("a random spell is flagged, and named", #ids == 1 and ids[1] == "RANDOM_PROJECTILE",
 	" (" .. table.concat(ids, ",") .. ")")
 
+-- ---- conditional spells: known state is not a guess ---------------------------------
+
+-- Cards the first cast fired, flattened to a list of ids.
+local function fired(sim)
+	local out = {}
+	local function walk(nodes)
+		for _, n in ipairs(nodes or {}) do
+			out[#out + 1] = n.id
+			walk(n.children)
+		end
+	end
+	walk(sim.casts[1] and sim.casts[1].nodes)
+	return table.concat(out, ",")
+end
+
+local if_hp = { "IF_HP", "LIGHT_BULLET", "IF_END", "BOUNCY_ORB" }
+local fresh = support.new_engine()           -- nothing supplied: all defaults
+local function run_in(eng, tokens)
+	return S.simulate(eng, { tokens = tokens, spells_per_cast = 1 })
+end
+sim = run_in(fresh, if_hp)
+passck("IF_HP on an unsupplied world is a guess", #S.uncertain_ids(sim) == 1,
+	" (" .. table.concat(S.uncertain_ids(sim), ",") .. ")")
+
+fresh.set_world({ hp = 4, max_hp = 4 })
+sim = run_in(fresh, if_hp)
+local healthy = fired(sim)
+passck("IF_HP with the real HP supplied is certain", #S.uncertain_ids(sim) == 0)
+passck("...and records the HP it depended on", sim.deps.hp == 4 and sim.deps.max_hp == 4)
+passck("...and stays valid while those values hold", fresh.deps_hold(sim.deps))
+
+fresh.set_world({ hp = 1, max_hp = 4 })
+passck("...and is stale once HP changes", not fresh.deps_hold(sim.deps))
+sim = run_in(fresh, if_hp)
+passck("low HP takes the other branch", fired(sim) ~= healthy,
+	" (" .. healthy .. " vs " .. fired(sim) .. ")")
+passck("...and is certain as well", #S.uncertain_ids(sim) == 0)
+
+-- every other: the toggle is the player's live state; each cast flips it.
+local every = { "IF_HALF", "LIGHT_BULLET", "IF_END", "BOUNCY_ORB" }
+sim = run_in(fresh, every)
+passck("IF_HALF without the live toggle is a guess", #S.uncertain_ids(sim) == 1)
+fresh.set_world({ every_other_state = 0 })
+sim = run_in(fresh, every)
+passck("IF_HALF with the live toggle is certain", #S.uncertain_ids(sim) == 0)
+local first_run = fired(sim)
+sim = run_in(fresh, every)
+passck("a run always starts from the supplied toggle (no leak between runs)",
+	fired(sim) == first_run)
+fresh.set_world({ every_other_state = 1 })
+sim = run_in(fresh, every)
+passck("the other toggle value takes the other branch", fired(sim) ~= first_run)
+
+-- randomness stays a guess whatever the world says
+fresh.set_world({ hp = 4, max_hp = 4, every_other_state = 0 })
+sim = run_in(fresh, { "RANDOM_PROJECTILE" })
+passck("randomness is still uncertain with a full world", #S.uncertain_ids(sim) == 1)
+
 -- ---- bad input -----------------------------------------------------------------------
 
 sim = simulate({ "LIGHT_BULLET", "NO_SUCH_SPELL" })
