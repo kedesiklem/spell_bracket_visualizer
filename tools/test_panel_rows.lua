@@ -451,6 +451,56 @@ do
 	eq("scroll: the hint is shown", bottom[#bottom], "PgUp/PgDn: scroll")
 end
 
+-- ---- 7. hover tooltip and click-to-open for a row cut with "..." -------------
+
+do
+	local long = "Light Bullet Trigger Spitter Damage Plus Heavy Spread Bouncing Burst"
+	local anchor = { boxes = { { top = 48, right = 400 } }, sel = 1 }
+	local function draw(opts)
+		drawn = { texts = {} }
+		T.draw_panel(nil, { { bars = {}, label = long, color = GREY } }, TITLE, 640, 360,
+			anchor, 1.0, opts)
+		return drawn.texts
+	end
+	local function row_pos(texts)
+		for _, t in ipairs(texts) do
+			if t.text ~= TITLE and t.text:sub(-3) == "..." then return t.x, t.y end
+		end
+	end
+	local function has_full(texts)
+		local joined = {}
+		for _, t in ipairs(texts) do joined[#joined + 1] = (t.text:gsub("^%s+", "")) end
+		return table.concat(joined, " "):find(long, 1, true) ~= nil
+	end
+
+	local view = {}
+	local x, y = row_pos(draw(view))
+	eq("tooltip: the row is cut short without a pointer", x ~= nil, true)
+	eq("tooltip: ...and the full text is not shown", has_full(draw(view)), false)
+
+	view.mouse = { x = x + 5, y = y + 2, click = false }
+	eq("tooltip: hovering the cut row shows its full text", has_full(draw(view)), true)
+
+	view.mouse = { x = 5, y = 5, click = false }
+	eq("tooltip: no tooltip when the pointer is elsewhere", has_full(draw(view)), false)
+
+	view.mouse = { x = x + 5, y = y + 2, click = true }
+	draw(view)
+	view.mouse = nil
+	local opened = draw(view)
+	eq("click: the row opens in place, wrapped in full", has_full(opened) and not row_pos(opened), true)
+
+	-- clicking an opened row closes it again
+	local ox, oy
+	for _, t in ipairs(opened) do
+		if t.text ~= TITLE then ox, oy = t.x, t.y; break end
+	end
+	view.mouse = { x = ox + 5, y = oy + 2, click = true }
+	draw(view)
+	view.mouse = nil
+	eq("click: clicking it again closes it", row_pos(draw(view)) ~= nil, true)
+end
+
 print("")
 print(failures .. " failure(s)")
 os.exit(failures == 0 and 0 or 1)

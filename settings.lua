@@ -21,9 +21,9 @@ mod_settings = {
 	{
 		id = "long_labels",
 		ui_name = "Wand Structure Panel: Long Rows",
-		ui_description = "A row wider than the panel either wraps onto the next line\n(default, so you can read it in full) or is cut short with '...'.\nA structure taller than the screen scrolls with PageUp / PageDown.",
-		value_default = "wrap",
-		values = { { "wrap", "Wrap (default)" }, { "truncate", "Truncate with ..." } },
+		ui_description = "What happens to a row wider than the panel.\nTooltip (default): it is cut with '...'; hover it to read the\nfull text, click it to open it in place (click again to close).\nWrap: every long row continues on the next line.\nTruncate: just cut with '...'.\nA structure taller than the screen scrolls with PageUp / PageDown.",
+		value_default = "tooltip",
+		values = { { "tooltip", "Tooltip + click (default)" }, { "wrap", "Wrap" }, { "truncate", "Truncate with ..." } },
 		scope = MOD_SETTING_SCOPE_RUNTIME,
 	},
 	{

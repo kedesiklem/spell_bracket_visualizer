@@ -49,6 +49,21 @@ local KEY_PAGEUP, KEY_PAGEDOWN = 75, 78
 local SCROLL_STEP = 5
 local panel_view = { scroll = 0 }
 
+-- The raw pointer in GUI coordinates (the engine reports it on a 1280x720
+-- screen, twice the 640x360 GUI -- the same conversion the measure tool uses),
+-- plus whether the left button went down this frame.  nil when unavailable.
+local function read_pointer(sw, sh)
+	if type(InputGetMousePosOnScreen) ~= "function" then return nil end
+	local ok, mx, my = pcall(InputGetMousePosOnScreen)
+	if not ok or not mx or not my then return nil end
+	local clicked = false
+	if type(InputIsMouseButtonJustDown) == "function" then
+		local okc, down = pcall(InputIsMouseButtonJustDown, 1)
+		clicked = okc and down == true
+	end
+	return { x = mx * sw / 1280, y = my * sh / 720, click = clicked }
+end
+
 local function key_pressed(code)
 	if type(InputIsKeyJustDown) ~= "function" then return false end
 	local ok, down = pcall(InputIsKeyJustDown, code)
@@ -1317,7 +1332,13 @@ end
 -- there takes over the full-height right column under the bars (may cover the
 -- Wet/Tinker status text, by design). Long labels are truncated to MAX_PANEL_W.
 -- `opts` (optional) lets a long structure be READ rather than cut off:
---   opts.wrap    wrap long labels onto continuation lines instead of "..."
+--   opts.wrap    wrap every long label onto continuation lines instead of "..."
+--   opts.expanded  { [label] = true } rows the reader opened by clicking them;
+--                wrapped in full like opts.wrap does.  Written by this function.
+--   opts.mouse   { x, y, click } in GUI coordinates (nil = no pointer): a row cut
+--                short with "..." shows its full text in a tooltip while hovered,
+--                and a click opens / closes it.  The panel's gui stays
+--                non-interactive, so this reads the raw pointer instead.
 --   opts.scroll  first visible content row, 0-based; clamped here and written
 --                back, so the caller keeps the position between frames.  A
 --                non-nil value also turns on the "PgUp/PgDn" hint line.
@@ -1349,14 +1370,19 @@ local function draw_panel(gui, rows, title, sw, sh, anchor, scale, opts)
 	local avail = sw - RIGHT_MARGIN - PANEL_GAP - sel_right
 	local max_panel_w = math.min(MAX_PANEL_W, sw * 0.5, avail)
 	if max_panel_w < 60 then max_panel_w = 60 end -- floor for a near-full-width active wand
-	if opts.wrap then
+	opts.expanded = opts.expanded or {}
+	do
 		local expanded = {}
 		for _, r in ipairs(rows) do
+			local open = opts.wrap or opts.expanded[r.label]
 			local bars_w = (r.header and 0 or #r.bars) * bar_w
-			local lines = wrap_label(gui, r.label, scale, max_panel_w - pad * 2 - bars_w)
+			local lines = open and wrap_label(gui, r.label, scale, max_panel_w - pad * 2 - bars_w)
+				or { r.label }
 			for _, text in ipairs(lines) do
 				local copy = {}
 				for k, v in pairs(r) do copy[k] = v end
+				copy.key, copy.full = r.label, r.label
+				copy.opened = #lines > 1 and opts.expanded[r.label] or nil
 				copy.label = text
 				expanded[#expanded + 1] = copy
 			end
@@ -1367,6 +1393,7 @@ local function draw_panel(gui, rows, title, sw, sh, anchor, scale, opts)
 	for _, r in ipairs(rows) do
 		local bars_w = (r.header and 0 or #r.bars) * bar_w
 		r.label = fit_label(gui, r.label, scale, max_panel_w - pad * 2 - bars_w)
+		r.cut = (r.label ~= r.full) and not r.opened
 		local w = bars_w + (text_dims(gui, r.label, scale))
 		if w > max_w then max_w = w end
 	end
@@ -1456,8 +1483,19 @@ local function draw_panel(gui, rows, title, sw, sh, anchor, scale, opts)
 	GuiZSet(gui, PANEL_TEXT_Z)
 	GuiText(gui, px, y0, title, scale)
 	local y = y0 + line_h + 2
+	local mouse, tooltip = opts.mouse, nil
 	for _, r in ipairs(rows) do
 		local x = px
+		-- a row that was cut short (or that the reader opened) answers the pointer
+		if mouse and (r.cut or r.opened) and r.key
+			and mouse.x >= px - pad and mouse.x <= px - pad + panel_w
+			and mouse.y >= y and mouse.y < y + line_h then
+			if mouse.click then
+				opts.expanded[r.key] = (not opts.expanded[r.key]) or nil
+			elseif r.cut then
+				tooltip = r.full
+			end
+		end
 		local bars = r.bars
 		if r.header then bars = {} end -- headers sit flush left
 		for _, bc in ipairs(bars) do   -- rainbow nesting spines
@@ -1468,6 +1506,25 @@ local function draw_panel(gui, rows, title, sw, sh, anchor, scale, opts)
 		GuiColorSetForNextWidget(gui, r.color[1], r.color[2], r.color[3], 1)
 		GuiText(gui, x, y, r.label, scale)
 		y = y + line_h
+	end
+
+	-- the full text of the hovered row, next to the pointer, in front of everything
+	if tooltip then
+		local tip_w = math.min(sw * 0.6, 280)
+		local lines = wrap_label(gui, tooltip, scale, tip_w - pad * 2)
+		local widest = 0
+		for _, l in ipairs(lines) do
+			widest = math.max(widest, (text_dims(gui, l, scale)))
+		end
+		local box_w, box_h = widest + pad * 2, #lines * line_h + pad * 2
+		local tx = math.max(4, math.min(mouse.x + 8, sw - box_w - 4))
+		local ty = math.max(4, math.min(mouse.y + 12, sh - box_h - 4))
+		GuiZSet(gui, PANEL_BG_Z - 2)
+		GuiImageNinePiece(gui, 90211, tx - pad, ty - pad, box_w, box_h, 1.0)
+		GuiZSet(gui, PANEL_TEXT_Z - 2)
+		for i, l in ipairs(lines) do
+			GuiText(gui, tx, ty + (i - 1) * line_h, l, scale)
+		end
 	end
 	GuiZSet(gui, 1)
 end
@@ -1673,8 +1730,9 @@ function M.update()
 	-- Track C: "hide" (default) withholds slot brackets on a wand whose tier
 	-- is worse than exact; "show" draws them anyway. See draw_box_brackets.
 	local uncertain_brackets = get("spell_bracket_visualizer.uncertain_brackets") or "hide"
-	-- "wrap" (default) continues a long row on the next line; "truncate" cuts it to "...".
-	local long_labels = get("spell_bracket_visualizer.long_labels") or "wrap"
+	-- "tooltip" (default): cut rows show their full text on hover and open on click;
+	-- "wrap": every long row continues on the next line; "truncate": plain "...".
+	local long_labels = get("spell_bracket_visualizer.long_labels") or "tooltip"
 
 	local sw, sh = GuiGetScreenDimensions(gui)
 	-- refw: the GEOMETRY reference width. The engine draws the inventory in fixed
@@ -1736,7 +1794,8 @@ function M.update()
 			}
 			if key_pressed(KEY_PAGEDOWN) then panel_view.scroll = panel_view.scroll + SCROLL_STEP end
 			if key_pressed(KEY_PAGEUP) then panel_view.scroll = panel_view.scroll - SCROLL_STEP end
-			panel_view.wrap = long_labels ~= "truncate"
+			panel_view.wrap = long_labels == "wrap"
+			panel_view.mouse = read_pointer(sw, sh)
 			draw_panel(gui, sim_rows(wd.sim, wd.cfg, wd.always, wd.uncertain_ids),
 				title, sw, sh, anchor, panel_scale, panel_view)
 		end
