@@ -180,9 +180,10 @@ keep one mod's quirk from blanking every wand:
 Noita draws the inventory in C++, so the slot rows are modelled from the wand
 sprite's thickness `h` (`BOX` in `grouping_overlay.lua`, guarded by
 `tools/test_box_geometry.py`). The fit is calibrated on h 7..15; below that the
-box is held at the h7 value (`BOX.min_h`) because the header it must contain does
-not shrink with the sprite. That floor is inferred, not measured: a wand that
-still sits wrong is pinned with a measured entry in `SPRITE_OVERRIDES`.
+box is held at a floor (`BOX.min_h` = 6.2 px, i.e. about 34.6u) because the header
+it must contain does not shrink with the sprite. Measured on one h5 wand
+(wand_0654); a wand that still sits wrong is pinned with a measured entry in
+`SPRITE_OVERRIDES`.
 
 ## Running the tests
 
