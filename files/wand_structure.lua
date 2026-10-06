@@ -52,7 +52,16 @@
 --   children       expressions gathered by the head (multicast cards, trigger
 --                  payload) followed by the cards the head RE-CAST
 --   recast         true on a child that is a re-cast copy, not a drawn card
---   count          times an identical re-cast ran (Divide By 2 -> count 2)
+--   count          times an identical re-cast ran (a Greek letter copying the same card)
+--   sources        slots of the cards a re-cast copied (what a Greek letter copied);
+--                  the overlay marks them on the wand
+--   runs           times the engine ran the head, when a Divide By chain led it: the
+--                  EXACT count (Divide 3 over Divide 2 over a bullet -> 6), pooled
+--                  from the engine's own runs, not multiplied here
+--   silent_runs    of those, how many drew nothing (only for a head that draws)
+--   divided        a Divide By chain leads the head; the bracket opens at the first
+--                  Divide By and encloses the whole chain
+--   link_runs      { [index in modifiers] = N } a modifier a Divide By re-ran
 --   grouped        the head's brackets enclose more than one card
 --   first, last    every slot the expression removed; the span first..last reaches
 --                  into the wrapped-in cards when the wand wrapped
@@ -62,6 +71,15 @@
 --   uncertain      some card of it read game state or randomness; uncertain_ids
 --                  = { [action_id] = true } names which
 --   kind-specific  trigger = "timer"|"hit_world"|"death", payload = N,
+--                  trigger_frames = N (timer),
+--                  swept = { {slot, id, effect, consumed}... } the cards an Add Trigger
+--                  stepped over; effect "applied" | "depleted" | "ignored" | "scanner",
+--                  consumed false when the scan failed (they stay in the wand),
+--                  trigger_failed = "no_target"|"not_carrier"|"depleted_target"
+--                  (an Add Trigger that consumed nothing), no_payload = true (it
+--                  fired its target plainly: nothing left to carry),
+--                  scan_mismatch = true (the replay of the scan disagreed with the
+--                  recording -- a bug flag, never expected),
 --                  scan = true (Add Trigger family: head was swept, not played);
 --                  cleared = { slot... } (reset); skipped = { slot... } (cards a
 --                  spell threw away without casting, e.g. a failed "If");
@@ -148,6 +166,42 @@ local function extent(slots)
 	return lo, hi
 end
 
+--- Divide By: the engine's own signature is that its body returns an iteration
+-- count (see cast_tracer.lua).  It re-runs the card that follows it.
+local function is_divider(node)
+	return node.kind == "action" and node.divides == true
+end
+
+local function union_into(set, list)
+	for _, v in ipairs(list or {}) do set[v] = true end
+end
+
+--- Several runs of the SAME card (Divide By ran its target N times, and the
+-- target's own Divide By ran ITS target N times for each of those...) as one
+-- node: the children of every run pooled, so whatever the engine did N times
+-- is simply counted -- 3 runs of a Divide By 2 that each ran a bullet twice are
+-- 6 runs of the bullet, with no arithmetic done here.
+local function merge_runs(runs)
+	local merged = {}
+	for k, v in pairs(runs[1]) do merged[k] = v end
+	merged.runs = #runs
+	merged.silent_runs = 0
+	merged.children, merged.draws = {}, {}
+	local span, net, wrapped_in = {}, {}, {}
+	merged.wraps = 0
+	for _, run in ipairs(runs) do
+		for _, child in ipairs(run.children or {}) do merged.children[#merged.children + 1] = child end
+		for _, draw in ipairs(run.draws or {}) do merged.draws[#merged.draws + 1] = draw end
+		union_into(span, run.span); union_into(net, run.net); union_into(wrapped_in, run.wrapped_in)
+		merged.wraps = merged.wraps + (run.wraps or 0)
+		if run.uncertain then merged.uncertain = true end
+		if run.cleared and not merged.cleared then merged.cleared = run.cleared end
+		if run.suppressed then merged.silent_runs = merged.silent_runs + 1 end
+	end
+	merged.span, merged.net, merged.wrapped_in = sorted_keys(span), sorted_keys(net), sorted_keys(wrapped_in)
+	return merged
+end
+
 --- Fill first/last, ffirst/flast, wfirst/wlast on `target` from a slot list and
 -- the set of slots removed after the wand wrapped.
 local function assign_spans(target, slots, wrapped_set)
@@ -186,6 +240,12 @@ local function fold(recasts)
 		local previous = out[#out]
 		if previous and signature(previous) == signature(expr) then
 			previous.count = previous.count + 1
+			for _, slot in ipairs(expr.sources or {}) do
+				previous.sources = previous.sources or {}
+				local known = false
+				for _, have in ipairs(previous.sources) do if have == slot then known = true end end
+				if not known then previous.sources[#previous.sources + 1] = slot end
+			end
 		else
 			expr.count = 1
 			out[#out + 1] = expr
@@ -204,6 +264,9 @@ local function gather_children(ctx, source_nodes, recast_nodes)
 	for _, node in ipairs(recast_nodes) do
 		local expr = build_expression(ctx, node)
 		expr.recast = true
+		-- The slot of the card whose body was re-run: what a Greek letter (or
+		-- Double Spell...) copied.  Lets the overlay mark it on the wand.
+		if node.slot then expr.sources = { node.slot } end
 		recasts[#recasts + 1] = expr
 	end
 	for _, expr in ipairs(fold(recasts)) do children[#children + 1] = expr end
@@ -258,38 +321,150 @@ local function finish(expr, chain, outer)
 	return expr
 end
 
--- A modifier chain that ran out of cards: nothing left to modify.
+-- A modifier chain that ran out of cards: nothing left to modify.  A Divide By
+-- with nothing after it is the same story: it is shown alone, as itself.
 local function dangling_expression(chain)
 	local last = chain[#chain]
+	local mods = ids_of(chain)
+	local divides_nothing = last.divides == true
+	if divides_nothing then mods[#mods] = nil end
 	local expr = {
-		kind = "leaf", id = last.id, atype = "MODIFIER", dangling = true,
-		modifiers = ids_of(chain), children = {},
+		kind = "leaf", id = last.id, atype = divides_nothing and "OTHER" or "MODIFIER",
+		dangling = true, divides_nothing = divides_nothing or nil,
+		modifiers = mods, children = {},
 		head = chain[1].slot,
 	}
 	return finish(expr, chain, chain[1])
 end
 
-function build_expression(ctx, node)
-	-- 1. Fold leading prefix cards into the card they modify.
-	local chain, cur = {}, node
-	while is_prefix(cur) do
-		chain[#chain + 1] = cur
-		local next_card = drawn_children(cur)[1]
-		if next_card == nil then return dangling_expression(chain) end
-		cur = next_card
+-- ---- Add Trigger's scan ---------------------------------------------------
+
+local STEPPABLE = { MODIFIER = true, PASSIVE = true, OTHER = true, DRAW_MANY = true }
+local PAYLOAD_TYPES = { PROJECTILE = true, STATIC_PROJECTILE = true, MATERIAL = true, UTILITY = true }
+
+--- Why an Add Trigger / Add Timer / Add Expiration Trigger did what it did.
+--
+-- The recording says WHAT left the deck; it cannot say why a scan that left
+-- nothing behind stopped, and that is the interesting part ("why did my
+-- trigger do nothing?").  So the body's decision is replayed over the deck as
+-- it stood when the body started (`deck_order`), following the same rules the
+-- body does:
+--
+--   1. step over cards while they are MODIFIER / PASSIVE / OTHER / DRAW_MANY.
+--      A modifier that still has charges and is not itself an Add Trigger is
+--      APPLIED to the projectile (without drawing); a depleted one, and every
+--      non-modifier, is stepped over with no effect.  Stepped cards are DISCARDED
+--      with the target when the scan succeeds -- their charges are not spent.
+--   2. the card it stops on is the target.  It fails when
+--        no_target        the scan ran off the end of the deck
+--        not_carrier      the target has no trigger version (no related projectile)
+--        depleted_target  the target is out of charges
+--      and then NOTHING is consumed: the cards stay in the deck, and the
+--      modifiers it applied along the way stay applied to the shot.
+--   3. on success the target becomes the trigger's projectile.  If no
+--      projectile-like card is left in the deck to be the payload, the target
+--      is cast plainly (`payload = false`) and no trigger is made.
+--
+-- The result is checked against the recording by the caller; if they disagree
+-- the analysis is dropped rather than shown.
+--
+--   -> { swept = { {slot, id, effect = "applied"|"depleted"|"ignored"|"scanner"} },
+--        failed = "no_target"|"not_carrier"|"depleted_target" | nil,
+--        target = slot,        success only
+--        payload = bool }      success only: is there a card to carry
+local function analyse_scan(ctx, node)
+	local order, depleted = node.deck_order, node.deck_depleted or {}
+	if order == nil then return nil end
+	local function id_at(k) return ctx.tokens[order[k]] end
+	local function type_at(k) return ctx.engine.action_type(id_at(k)) end
+
+	local swept, i = {}, 1
+	while i <= #order and STEPPABLE[type_at(i)] do
+		local effect
+		if SCANNERS[id_at(i)] then effect = "scanner"
+		elseif depleted[order[i]] then effect = "depleted"
+		elseif type_at(i) == "MODIFIER" then effect = "applied"
+		else effect = "ignored" end
+		swept[#swept + 1] = { slot = order[i], id = id_at(i), effect = effect }
+		i = i + 1
 	end
+
+	local result = { swept = swept }
+	if order[i] == nil then
+		result.failed = "no_target"
+	elseif ctx.engine.carries(id_at(i)) == nil then
+		result.failed = "not_carrier"
+	elseif depleted[order[i]] then
+		result.failed = "depleted_target"
+	else
+		result.target = order[i]
+		result.payload = false
+		for k = i + 1, #order do
+			if PAYLOAD_TYPES[type_at(k)] then result.payload = true; break end
+		end
+	end
+	return result
+end
+
+function build_expression(ctx, node)
+	-- 1. Fold leading cards into the card they modify: modifiers (a prefix draws
+	-- the card it modifies) and Divide By (which re-runs the card after it).  A
+	-- Divide By's target runs several times; those runs are pooled into one
+	-- node (merge_runs), so a chain of Divide By cards ends on ONE target whose
+	-- `runs` is the exact number of times the engine ran it.
+	local chain, cur = {}, node
+	local divider, runs = {}, {}     -- node -> true / times it ran (via a Divide By)
+	while true do
+		if is_divider(cur) then
+			chain[#chain + 1] = cur
+			divider[cur] = true
+			local targets = direct_children(cur)
+			if #targets == 0 then return dangling_expression(chain) end
+			cur = merge_runs(targets)
+			runs[cur] = #targets
+		elseif is_prefix(cur) then
+			chain[#chain + 1] = cur
+			local next_card = drawn_children(cur)[1]
+			if next_card == nil then return dangling_expression(chain) end
+			cur = next_card
+		else
+			break
+		end
+	end
+	local has_divider = next(divider) ~= nil
 
 	local outer = chain[1] or cur
 	local marked = {}
 	for _, link in ipairs(chain) do
 		if link.slot then marked[#marked + 1] = link.slot end
 	end
-	if cur.via == "draw" and cur.slot then marked[#marked + 1] = cur.slot end
+	if (cur.via == "draw" or runs[cur]) and cur.slot then marked[#marked + 1] = cur.slot end
 	local expr = {
 		id = cur.id, atype = cur.atype or ctx.engine.action_type(cur.id) or "OTHER",
 		modifiers = ids_of(chain), kind = "leaf", children = {},
 		head = (cur.via == "draw") and cur.slot or nil,
 	}
+	-- Divide By cards open the bracket: it encloses them and the card they
+	-- re-run.  (Modifiers before the first Divide By stay outside it.)
+	if has_divider then
+		for _, link in ipairs(chain) do
+			if divider[link] then expr.head = link.slot; break end
+		end
+		expr.divided = true
+	end
+	-- How many times each link of the chain ran (a Damage run twice by a
+	-- Divide By is applied twice).  A Divide By itself is not counted: its
+	-- number is in its name.
+	for index, link in ipairs(chain) do
+		if runs[link] and runs[link] > 1 and not divider[link] then
+			expr.link_runs = expr.link_runs or {}
+			expr.link_runs[index] = runs[link]
+		end
+	end
+	if runs[cur] and runs[cur] > 1 then
+		expr.runs = runs[cur]
+		if cur.silent_runs > 0 then expr.silent_runs = cur.silent_runs end
+	end
 	local function note_uncertain(node_)
 		if node_.uncertain then
 			expr.uncertain = true
@@ -303,7 +478,9 @@ function build_expression(ctx, node)
 	-- Re-casts made by any card of the chain (a copy of the next spell, ...).
 	local recast_nodes = {}
 	for _, link in ipairs(chain) do
-		for _, node_ in ipairs(direct_children(link)) do recast_nodes[#recast_nodes + 1] = node_ end
+		if not divider[link] then   -- a Divide By's runs ARE the target, not re-casts
+			for _, node_ in ipairs(direct_children(link)) do recast_nodes[#recast_nodes + 1] = node_ end
+		end
 	end
 
 	-- 2. Classify the head by what its body did.
@@ -348,14 +525,44 @@ function build_expression(ctx, node)
 	local stepped = {}
 	for _, slot in ipairs(swept_slots(cur)) do stepped[slot] = true end
 	for _, child in ipairs(carried) do stepped[child.slot] = true end
+	-- What a scanner removed is recorded exactly (`pulled`); prefer it to the
+	-- inference above, which a wrap can fool (a pulled card brought back by the
+	-- wrap is covered by a later child and would look as if nothing was pulled).
+	local scanner_pulled = SCANNERS[cur.id] and cur.pulled ~= nil
+	if scanner_pulled then stepped = set_of(cur.pulled) end
 
-	if shot then
+	-- Add Trigger family: replay the body's decision so the panel can say what
+	-- it swept and why it failed.  The replay must agree with the recording about
+	-- whether anything was consumed; if it does not, trust the recording and
+	-- flag the expression (the tests treat that flag as a failure).
+	local scan
+	if SCANNERS[cur.id] then
+		scan = analyse_scan(ctx, cur)
+		local consumed = next(stepped) ~= nil
+		if scan and (scan.failed == nil) ~= consumed then
+			expr.scan_mismatch = true
+			scan = nil
+		end
+	end
+	if scan and #scan.swept > 0 then
+		expr.swept = scan.swept
+		for _, card in ipairs(expr.swept) do card.consumed = scan.failed == nil end
+	end
+
+	if scan and scan.failed then
+		-- Nothing consumed.  The silent applications of the modifiers it stepped
+		-- over are not casts, so they are not shown as re-casts either.
+		expr.trigger_failed = scan.failed
+		own_direct = {}
+	elseif shot then
 		expr.kind = "trigger"
 		expr.trigger = shot.trigger
+		expr.trigger_frames = shot.trigger_frames
 		expr.payload = shot.draws[1] and shot.draws[1].n or nil
 		local swept = swept_slots(cur)
 		-- The projectile is the last card swept without being cast.
-		if #swept > 0 then present_as_carried(swept[#swept], stepped) end
+		local target = scan and scan.target or swept[#swept]
+		if target then present_as_carried(target, stepped) end
 		expr.children = gather_children(ctx, drawn_children(shot), {})
 	elseif cur.cleared and wanted == 0 and #cur.children == 0 then
 		expr.kind = "reset"
@@ -364,9 +571,13 @@ function build_expression(ctx, node)
 		expr.kind = "multicast"
 		expr.group = wanted
 		expr.children = gather_children(ctx, drawn_children(cur), {})
-	elseif #carried > 0 and SCANNERS[cur.id] then
+	elseif scan and scan.target then
 		-- Add Trigger with no card to carry a payload: the projectile fires plainly.
+		present_as_carried(scan.target, stepped)
+		expr.no_payload = true
+	elseif #carried > 0 and SCANNERS[cur.id] then
 		present_as_carried(carried[#carried].slot, stepped)
+		expr.no_payload = true
 	else
 		local skipped = swept_slots(cur)
 		if #skipped > 0 and #own_direct == 0 then expr.skipped = skipped end
@@ -377,12 +588,22 @@ function build_expression(ctx, node)
 	for _, child in ipairs(recasts) do expr.children[#expr.children + 1] = child end
 
 	if #marked >= 2 then
-		table.sort(marked)
-		expr.marked = marked
+		-- a card can be listed twice (a Divide By's target pulls itself back off the deck)
+		local unique, seen = {}, {}
+		for _, slot in ipairs(marked) do
+			if not seen[slot] then seen[slot] = true; unique[#unique + 1] = slot end
+		end
+		table.sort(unique)
+		if #unique >= 2 then expr.marked = unique end
 	end
 
 	-- 3. Spans, from what the engine removed while the outermost card ran.
-	return finish(expr, chain, outer)
+	-- a bullet fired N times says it all; "N-1 of them silent" only matters for a
+	-- card that draws (the silent runs drew nothing)
+	if expr.kind == "leaf" then expr.silent_runs = nil end
+	local finished = finish(expr, chain, outer)
+	if has_divider then finished.grouped = true end
+	return finished
 end
 
 -- ---- casts ----------------------------------------------------------------

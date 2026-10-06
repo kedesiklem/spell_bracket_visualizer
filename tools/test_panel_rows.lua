@@ -492,6 +492,76 @@ do
 	eq("click: clicking it again closes it", row_pos(draw(view)) ~= nil, true)
 end
 
+-- ---- cards that need more than a name: Divide By, copies, triggers -----------
+--
+-- The adapter's fields (wand_structure.lua) turned into words.  Nodes are built
+-- by hand: these tests are about the wording, not about what the engine did.
+do
+	local function labels(node)
+		node.modifiers = node.modifiers or {}
+		node.children = node.children or {}
+		local sim = { casts = { { nodes = { node }, wrapped = false, mana = 0 } }, wrapped = false }
+		local out = {}
+		for _, r in ipairs(T.sim_rows(sim, { spells_per_cast = 1 }, {})) do
+			if not r.sticky then out[#out + 1] = r.label end
+		end
+		return out
+	end
+
+	local row = labels({ kind = "leaf", id = "LIGHT_BULLET", atype = "PROJECTILE",
+		modifiers = { "DIVIDE_4", "DIVIDE_4", "DIVIDE_4" }, runs = 64 })[1]
+	eq("divide chain: identical Divide By cards fold, the exact run count follows",
+		row, "[Divide 4 x3] Light Bullet  x64")
+
+	row = labels({ kind = "leaf", id = "LIGHT_BULLET", atype = "PROJECTILE",
+		modifiers = { "DIVIDE_2", "DAMAGE", "DAMAGE" }, link_runs = { [2] = 2 } })[1]
+	eq("a modifier a Divide By re-ran counts every run", row, "[Divide 2, Damage x3] Light Bullet")
+
+	row = labels({ kind = "multicast", id = "BURST_2", atype = "DRAW_MANY", group = 2,
+		modifiers = { "DIVIDE_2" }, runs = 2, silent_runs = 1 })[1]
+	eq("a target that draws says how many of its runs drew nothing",
+		row, "[Divide 2] Burst 2  x2 (1 draw nothing)")
+
+	row = labels({ kind = "leaf", id = "DIVIDE_2", atype = "OTHER", dangling = true,
+		divides_nothing = true })[1]
+	eq("a Divide By with nothing after it", row, "Divide 2  (nothing to repeat)")
+
+	row = labels({ kind = "leaf", id = "ALPHA", atype = "OTHER", children = {
+		{ kind = "leaf", id = "LIGHT_BULLET", atype = "PROJECTILE", recast = true,
+			count = 2, sources = { 1, 3 }, modifiers = {}, children = {} } } })[2]
+	eq("a Greek copy names the slots it copied",
+		row, "again: Light Bullet  x2  (copies slots 1, 3)")
+
+	local failed = labels({ kind = "leaf", id = "ADD_TRIGGER", atype = "OTHER",
+		trigger_failed = "no_target",
+		swept = { { id = "DAMAGE", slot = 2, effect = "applied", consumed = false } } })
+	eq("failed trigger: the head says why", failed[1],
+		"Add Trigger  (fails: no spell after it to attach to)")
+	eq("failed trigger: what it stepped over is still in the wand", failed[2],
+		"stepped over, kept in the wand: Damage (applied)")
+
+	local ok = labels({ kind = "trigger", id = "LIGHT_BULLET", atype = "PROJECTILE",
+		trigger = "timer", trigger_frames = 20, payload = 1,
+		modifiers = { "ADD_TIMER", "BURST_2", "DAMAGE" },
+		swept = { { id = "BURST_2", slot = 2, effect = "ignored", consumed = true },
+			{ id = "DAMAGE", slot = 3, effect = "depleted", consumed = true } },
+		children = { { kind = "leaf", id = "BOMB", atype = "PROJECTILE", modifiers = {}, children = {} } } })
+	eq("trigger: what was discarded with the target, and what it did",
+		ok[2], "stepped over, discarded: Burst 2 (no effect), Damage (no charges, no effect)")
+	eq("timer trigger: when the payload fires", ok[3], "after 0.33s:")
+	eq("trigger: the payload follows", ok[4], "Bomb")
+
+	eq("expiration trigger: says so",
+		labels({ kind = "trigger", id = "LIGHT_BULLET", atype = "PROJECTILE", trigger = "death",
+			children = { { kind = "leaf", id = "BOMB", atype = "PROJECTILE", modifiers = {}, children = {} } } })[2],
+		"on expiration:")
+
+	eq("trigger with nothing to carry fires plain",
+		labels({ kind = "leaf", id = "LIGHT_BULLET", atype = "PROJECTILE", no_payload = true,
+			modifiers = { "ADD_TRIGGER" } })[1],
+		"[Add Trigger] Light Bullet  (no spell left to carry: fires plain)")
+end
+
 print("")
 print(failures .. " failure(s)")
 os.exit(failures == 0 and 0 or 1)

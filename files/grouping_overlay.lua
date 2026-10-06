@@ -103,6 +103,7 @@ local COLOR = {
 	OTHER             = { 0.78, 0.78, 0.78 },
 }
 local HEADER_COLOR = { 0.85, 0.85, 0.85 }
+local INFO_COLOR   = { 0.62, 0.65, 0.70 } -- quiet notes under a row (what was swept, why it failed)
 local WRAP_COLOR   = { 1.00, 0.45, 0.15 } -- loud: wrapping is the headline info
 
 -- SLIME-style rainbow: nesting color cycles by depth (panel spines and slot
@@ -283,25 +284,108 @@ local function fmt(n)
 	return tostring(n)
 end
 
+-- ---- wording for the cards that need more than a name -----------------------
+
+-- Leading cards, as names.  Identical neighbours are folded ("Damage x3"): a
+-- Divide By runs the card after it several times, and chained Divide By cards
+-- of the same size read better as a count than as a stutter.  `link_runs`
+-- (wand_structure.lua) says how often a modifier was re-run.
+local function modifier_names(node, rows)
+	local mods, names = node.modifiers or {}, {}
+	local i = 1
+	while i <= #mods do
+		local count = (node.link_runs and node.link_runs[i]) or 1
+		local j = i + 1
+		while j <= #mods and mods[j] == mods[i] do
+			count = count + ((node.link_runs and node.link_runs[j]) or 1)
+			j = j + 1
+		end
+		local name = dyn_name(mods[i], rows, node.uncertain_ids)
+		names[#names + 1] = count > 1 and (name .. " x" .. count) or name
+		i = j
+	end
+	return names
+end
+
+-- Why an Add Trigger / Add Timer / Add Expiration Trigger did nothing.
+local TRIGGER_FAILURE = {
+	no_target       = "no spell after it to attach to",
+	not_carrier     = "the next spell can't carry a trigger",
+	depleted_target = "the spell it would carry has no charges left",
+}
+
+-- What happened to a card an Add Trigger stepped over.
+local SWEPT_EFFECT = {
+	applied  = "applied",
+	depleted = "no charges, no effect",
+	ignored  = "no effect",
+	scanner  = "no effect",
+}
+
+-- One note listing the cards a scan stepped over, with what each did.  When the
+-- scan succeeded they were discarded with the target (charges untouched); when
+-- it failed they are all still in the wand.
+local function swept_note(node)
+	local parts = {}
+	for _, card in ipairs(node.swept) do
+		parts[#parts + 1] = display_name(card.id) .. " (" .. SWEPT_EFFECT[card.effect] .. ")"
+	end
+	local lead = node.trigger_failed and "stepped over, kept in the wand: "
+		or "stepped over, discarded: "
+	return lead .. table.concat(parts, ", ")
+end
+
+-- "on hit" / "after 0.33s" / "on expiration": when a trigger's payload fires.
+local function trigger_note(node)
+	if node.trigger == "timer" then
+		if node.trigger_frames then
+			return string.format("after %.2gs:", node.trigger_frames / 60)
+		end
+		return "after a delay:"
+	elseif node.trigger == "death" then
+		return "on expiration:"
+	end
+	return "on hit:"
+end
+
+-- Where a re-cast copy came from: the slots of the cards a Greek letter (or
+-- Double Spell...) copied.
+local function copy_note(node)
+	if not node.sources or #node.sources == 0 then return "" end
+	return "  (copies slot" .. (#node.sources > 1 and "s " or " ")
+		.. table.concat(node.sources, ", ") .. ")"
+end
+
 local function walk(rows, node, ancestor_colors, depth)
 	local mods = ""
-	if node.modifiers and #node.modifiers > 0 then
-		local names = {}
-		for _, m in ipairs(node.modifiers) do names[#names + 1] = dyn_name(m, rows, node.uncertain_ids) end
-		mods = "[" .. table.concat(names, ", ") .. "] "
-	end
+	local names = modifier_names(node, rows)
+	if #names > 0 then mods = "[" .. table.concat(names, ", ") .. "] " end
 
 	local name = dyn_name(node.id, rows, node.uncertain_ids)
 	-- no "xN" / "(trig N)" suffixes (user calls, 2026-06-11): the spell name
 	-- already says it and the indented children below show what was gathered
-	-- or carried as payload
+	-- or carried as payload.  The one count that IS shown is how often the engine
+	-- ran a card: a re-cast copy, or the target of a Divide By chain.
 	local label = mods .. name
-	if node.dangling then label = label .. "  (no projectile)" end
-	-- A card the engine re-ran (Divide By's copies, Alpha's self-copy, ...) is
-	-- not in the deck a second time: say it was re-cast, and how often.
+	if node.dangling then
+		label = label .. (node.divides_nothing and "  (nothing to repeat)" or "  (no projectile)")
+	end
+	if node.runs then
+		label = label .. "  x" .. node.runs
+		if node.silent_runs then label = label .. " (" .. node.silent_runs .. " draw nothing)" end
+	end
+	-- A card the engine re-ran (a Greek letter's copy, Alpha's self-copy, ...) is
+	-- not in the deck a second time: say it was re-cast, how often, and from where.
 	if node.recast then
 		label = "again: " .. label
 		if node.count and node.count > 1 then label = label .. "  x" .. node.count end
+		label = label .. copy_note(node)
+	end
+	-- Add Trigger family: failed (nothing consumed) or fired its target plainly.
+	if node.trigger_failed then
+		label = label .. "  (fails: " .. TRIGGER_FAILURE[node.trigger_failed] .. ")"
+	elseif node.no_payload then
+		label = label .. "  (no spell left to carry: fires plain)"
 	end
 	-- Cards a spell threw away without casting them (a failed "If ...").
 	if node.skipped and #node.skipped > 0 then
@@ -320,9 +404,15 @@ local function walk(rows, node, ancestor_colors, depth)
 
 	rows[#rows + 1] = { bars = copy_list(ancestor_colors), label = label, color = type_color(node.atype) }
 
+	local child_colors = copy_list(ancestor_colors)
+	child_colors[#child_colors + 1] = nest_color(depth) -- rainbow even when wrapped
+	local function note(text)
+		rows[#rows + 1] = { bars = copy_list(child_colors), label = text, color = INFO_COLOR }
+	end
+	if node.swept and #node.swept > 0 then note(swept_note(node)) end
+	if node.kind == "trigger" and node.trigger then note(trigger_note(node)) end
+
 	if node.children and #node.children > 0 then
-		local child_colors = copy_list(ancestor_colors)
-		child_colors[#child_colors + 1] = nest_color(depth) -- rainbow even when wrapped
 		for _, ch in ipairs(node.children) do walk(rows, ch, child_colors, depth + 1) end
 	end
 end
@@ -811,6 +901,12 @@ local MARK_UNDERLINE_DROP = 2  -- GUI below the bracket hooks' bottom edge; keep
                                -- clear of the level-0 hooks it would otherwise touch
 local MARK_INSET = 1           -- GUI trimmed off each end, so neighbouring chains stay apart
 local STRIKE_COLOR = { 1.00, 0.30, 0.30 }
+-- "copied" dots: small and cool-toned so they read as a footnote on the card,
+-- not as another bracket.  One dot per copier, at most MAX_COPY_DOTS drawn.
+local COPY_COLOR    = { 0.40, 0.90, 0.90 }
+local COPY_DOT      = 2    -- GUI px, square
+local COPY_DOT_GAP  = 2
+local MAX_COPY_DOTS = 4
 
 -- Draw what slot_marks.collect planned.  Only geometry lives here: which cards
 -- get a mark, and why, is decided in slot_marks.lua.
@@ -827,6 +923,16 @@ local function draw_marks(gui, marks, refw, rows_geo, idc)
 		elseif mark.kind == "strike" then
 			local x1, x2 = left_of(mark.col) + MARK_INSET + 2, right_of(mark.col) - MARK_INSET - 2
 			line(gui, 72000 + idc.n, x1, (yr.top + yr.bot) / 2, x2 - x1, 1, STRIKE_COLOR, 0.9)
+		elseif mark.kind == "copied" then
+			-- a centred row of dots just above the card's top edge
+			local dots = math.min(mark.n, MAX_COPY_DOTS)
+			local width = dots * COPY_DOT + (dots - 1) * COPY_DOT_GAP
+			local centre = (left_of(mark.col) + right_of(mark.col)) / 2
+			for d = 0, dots - 1 do
+				idc.n = idc.n + 1
+				line(gui, 72000 + idc.n, centre - width / 2 + d * (COPY_DOT + COPY_DOT_GAP),
+					yr.top - COPY_DOT - 1, COPY_DOT, COPY_DOT, COPY_COLOR, 0.95)
+			end
 		end
 	end
 end

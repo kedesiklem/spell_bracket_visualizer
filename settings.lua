@@ -27,8 +27,8 @@ mod_settings = {
 	},
 	{
 		id = "show_slot_marks",
-		ui_name = "Slot Marks (underline / strike)",
-		ui_description = "Underlines a modifier chain (the modifiers and the card they\nmodify) in the wand UI, and strikes through cards that are\ndrawn but never fire (depleted spells, cards a failed IF threw\naway).",
+		ui_name = "Slot Marks (underline / strike / copy dots)",
+		ui_description = "Underlines a modifier chain (the modifiers and the card they\nmodify) in the wand UI, and strikes through cards that are\ndrawn but never fire (depleted spells, cards a failed IF threw\naway). A small dot above a card means a Greek letter (or Double\nSpell...) copied it, one dot per copier.",
 		value_default = true,
 		scope = MOD_SETTING_SCOPE_RUNTIME,
 	},

@@ -30,9 +30,9 @@ local function plan(tokens, uses)
 	for i = 1, #tokens do cols[i] = i - 1; rows[i] = 0 end
 	local out = {}
 	for _, m in ipairs(marks_of.collect(sim, cols, rows)) do
-		out[#out + 1] = m.kind == "underline"
-			and string.format("underline %d-%d", m.ca, m.cb)
-			or string.format("strike %d", m.col)
+		if m.kind == "underline" then out[#out + 1] = string.format("underline %d-%d", m.ca, m.cb)
+		elseif m.kind == "copied" then out[#out + 1] = string.format("copied %d x%d", m.col, m.n)
+		else out[#out + 1] = string.format("strike %d", m.col) end
 	end
 	return table.concat(out, " | "), marks_of.collect(sim, cols, rows)
 end
@@ -46,6 +46,18 @@ eq("Add Trigger's scan is underlined up to its target, not the payload",
 	(plan({ "ADD_TRIGGER", "DAMAGE", "LIGHT_BULLET", "BOMB" })), "underline 0-2")
 eq("a depleted card is struck through",
 	(plan({ "LIGHT_BULLET", "LIGHT_BULLET", "DAMAGE" }, { [3] = 0 })), "strike 2")
+
+-- what a copier re-ran gets a dot; a card nobody copied gets none
+eq("alpha marks the card it copied (slot 1 -> column 0)",
+	(plan({ "LIGHT_BULLET", "ALPHA", "BOMB" })), "copied 0 x1")
+eq("a wand without a copier has no copy marks",
+	(plan({ "LIGHT_BULLET", "BOMB" })), "")
+eq("alpha copying itself marks nothing (it is not another card)",
+	(plan({ "ALPHA", "LIGHT_BULLET" })), "")
+eq("omega marks every card it re-ran",
+	(plan({ "LIGHT_BULLET", "BOMB", "OMEGA" })), "copied 0 x1 | copied 1 x1")
+eq("two copiers of the same card stack on it",
+	(plan({ "LIGHT_BULLET", "ALPHA", "ALPHA", "BOMB" })), "copied 0 x2")
 
 -- a chain that sits on two displayed rows draws nothing rather than a bad line
 do

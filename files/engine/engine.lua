@@ -21,6 +21,8 @@
 --   engine.action_type(id)      -> "PROJECTILE" | "MODIFIER" | ... | nil
 --   engine.knows(id)            -> bool    is this a spell the game defines?
 --   engine.name_key(id)         -> string|nil   the "$action_..." text key
+--   engine.carries(id)          -> number|nil   payload cards the spell carries as a
+--                                               trigger (related_projectiles), nil if none
 --   engine.spell_count()        -> number
 --   M.new_in_game(world)        -> engine | nil, error_message
 --                                  M.new with the game's own `dofile`
@@ -39,7 +41,7 @@ function M.new(host, world)
 	-- The tracer hooks the sandbox's functions, so it is attached -- and the
 	-- spell table read -- with the sandbox active.
 	local tracer
-	local known, name_keys, count = {}, {}, 0
+	local known, name_keys, count, carries = {}, {}, 0, {}
 	local ok, attach_err = pcall(game.run, function()
 		tracer = cast_tracer.attach(game.env, game.report)
 		for _, action in ipairs(game.env.actions) do
@@ -47,6 +49,9 @@ function M.new(host, world)
 				known[action.id] = true
 				name_keys[action.id] = action.name
 				count = count + 1
+				-- Trigger-capable cards: how many payload cards they carry.
+				local related = action.related_projectiles
+				if type(related) == "table" then carries[action.id] = related[2] or 1 end
 			end
 		end
 	end)
@@ -69,6 +74,9 @@ function M.new(host, world)
 	end
 	function engine.action_type(id) return tracer.action_type(id) end
 	function engine.knows(id) return known[id] == true end
+	--- Payload cards a card carries when Add Trigger turns it into a trigger
+	-- (its related_projectiles), or nil when it cannot carry one.
+	function engine.carries(id) return carries[id] end
 	function engine.name_key(id) return name_keys[id] end
 	function engine.spell_count() return count end
 	return engine

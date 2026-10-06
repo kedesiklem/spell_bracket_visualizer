@@ -1,13 +1,17 @@
 -- Decides which cards of a wand get a MARK drawn on them, besides brackets.
 --
--- Brackets say which cards a spell pulled in.  Two more things are worth seeing
--- on the slot row itself, and neither is a grouping:
+-- Brackets say which cards a spell pulled in.  Three more things are worth seeing
+-- on the slot row itself, and none is a grouping:
 --
 --   underline   a modifier chain: the modifiers and the card they modify are
 --               drawn as one unit, so "which card does Damage Plus feed?" is
 --               answered by a coloured line rather than by counting brackets.
 --   strike      a card that was drawn but never fired: a depleted spell, a card
 --               a failed "If ..." threw away.
+--   copied      a card whose body another card re-ran: what Alpha, Gamma, Tau,
+--               Omega, Double Spell... copied.  A small dot above the card, one
+--               per copier, so "which spell is this Greek letter copying?" is
+--               answered on the wand itself.  Only wands with a copier get any.
 --
 -- This module is pure -- slots in, columns out, no Gui and no pixels -- exactly
 -- like the bracket planner, so it is tested without the game.  What each mark
@@ -20,6 +24,7 @@
 --     rows  deck slot -> displayed slot row (0-based)
 --   mark = { kind = "underline", ca, cb, row }   columns ca..cb on one row
 --        | { kind = "strike", col, row }
+--        | { kind = "copied", col, row, n }   n copiers re-ran this card
 
 local M = {}
 
@@ -38,7 +43,24 @@ local function underline_of(expr, cols, rows)
 	return { kind = "underline", ca = cols[lo], cb = cols[hi], row = rows[lo] or 0 }
 end
 
-local function collect_expression(expr, cols, rows, out)
+-- Tally which slots were copied, by how many copiers.  A copy of the copier
+-- itself (Alpha as the first card copies Alpha) says nothing about another card
+-- and is not counted.
+local function tally_copies(expr, tally)
+	-- the copier's own slot: where it was drawn, or -- for a copy that itself
+	-- copies -- the slot of the card whose body is running
+	local own = expr.head or (expr.recast and expr.sources and expr.sources[1]) or nil
+	for _, child in ipairs(expr.children or {}) do
+		if child.recast then
+			for _, slot in ipairs(child.sources or {}) do
+				if slot ~= own then tally[slot] = (tally[slot] or 0) + (child.count or 1) end
+			end
+		end
+	end
+end
+
+local function collect_expression(expr, cols, rows, out, tally)
+	tally_copies(expr, tally)
 	if expr.marked then
 		local mark = underline_of(expr, cols, rows)
 		if mark then out[#out + 1] = mark end
@@ -49,18 +71,27 @@ local function collect_expression(expr, cols, rows, out)
 		end
 	end
 	for _, child in ipairs(expr.children or {}) do
-		collect_expression(child, cols, rows, out)
+		collect_expression(child, cols, rows, out, tally)
 	end
 end
 
 function M.collect(sim, cols, rows)
-	local out = {}
+	local out, tally = {}, {}
 	for _, cast in ipairs(sim.casts or {}) do
-		for _, expr in ipairs(cast.nodes) do collect_expression(expr, cols, rows, out) end
+		for _, expr in ipairs(cast.nodes) do collect_expression(expr, cols, rows, out, tally) end
+		for _, expr in ipairs(cast.always) do collect_expression(expr, cols, rows, out, tally) end
 		for _, slot in ipairs(cast.spent or {}) do
 			if cols[slot] then
 				out[#out + 1] = { kind = "strike", col = cols[slot], row = rows[slot] or 0 }
 			end
+		end
+	end
+	local slots = {}
+	for slot in pairs(tally) do slots[#slots + 1] = slot end
+	table.sort(slots)
+	for _, slot in ipairs(slots) do
+		if cols[slot] then
+			out[#out + 1] = { kind = "copied", col = cols[slot], row = rows[slot] or 0, n = tally[slot] }
 		end
 	end
 	return out

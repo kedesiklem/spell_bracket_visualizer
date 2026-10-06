@@ -74,7 +74,7 @@ shown as a re-cast child (`again: ... xN`), not as part of a bracket.
 | File | Responsibility |
 | --- | --- |
 | `wand_structure.lua` | Re-shapes the raw recording into the expression tree the overlay draws: folds modifiers into their head, groups multicasts, detects the Add Trigger scan, folds identical re-casts, computes slot spans. It decides nothing about game rules. Its header documents the output shape. |
-| `slot_marks.lua` | Plans the extra marks on the slot row (underline a modifier chain, strike a card that never fired). Pure: slots in, columns out. |
+| `slot_marks.lua` | Plans the extra marks on the slot row (underline a modifier chain, strike a card that never fired, dot a card a Greek letter copied). Pure: slots in, columns out. |
 | `wand_sim_cache.lua` | Memoises simulations keyed by the wand's contents, so the engine runs once per change rather than once per frame. |
 
 ### Overlay (`files/`) - "how is it drawn?"
@@ -93,6 +93,38 @@ shown as a re-cast child (`again: ... xN`), not as part of a bracket.
 | `test_sandbox_swap.lua`, `test_slot_delims.lua`, `test_slot_marks.lua`, `test_panel_rows.lua`, `test_font_compat.lua` | Bracket planner, mark planner, panel row clamp, font-safety layout. |
 | `preview_wand.lua` | Print any wand's brackets and expression tree in the terminal. |
 | `extract_gun.py` | Copy `gun.lua` and friends out of the player's `data.wak` into the git-ignored `.gun_ref/`. |
+
+## Spells that get special treatment
+
+Most cards are presented exactly as the engine recorded them. Three families
+need a little more, and each one is derived from the recording, not guessed:
+
+**Divide By.** The engine's own loop runs the card after it N times (and the
+target of a Divide By can be a Divide By). Divide By is recognised by the one
+thing only it does: its body returns an iteration count. The runs of its target
+are pooled into one node, so a chain collapses to `[Divide 3, Divide 2] Light
+Bullet x6`, where 6 is simply how many times the engine ran the bullet (the
+depth cut-off that drops a deep Divide By to one run is the engine's, not ours).
+Identical neighbours fold (`Divide 4 x3`). A target that draws pulls itself back
+off the deck, so a modifier under a Divide By is reported as the thing that
+repeats (`Damage x3`) rather than as extra bullets.
+
+**Greek letters (and any card that re-runs another).** A re-cast keeps the slot
+of the card whose body ran (`sources`). The panel says `(copies slot 3)` and the
+wand gets a small dot above that card, one per copier. A card copying itself
+(Alpha as the first card) is not marked.
+
+**Add Trigger / Add Timer / Add Expiration Trigger.** The recording says what
+left the deck but not why a scan that left nothing stopped, so the body's
+decision is replayed over the deck as it stood when the body began
+(`analyse_scan` in `wand_structure.lua`): modifiers it steps over are applied if
+they still have charges and discarded either way; passives, multicasts and other
+scanners are stepped over with no effect; the scan fails (nothing consumed, the
+cards stay in the wand) when it runs off the end of the deck, lands on a card
+with no trigger version, or lands on a depleted card; and with no card left to
+carry a payload the target fires plainly. The replay is checked against what the
+tracer saw the body pull out of the deck (`pulled`); a disagreement is flagged,
+never shown.
 
 ## Uncertainty
 

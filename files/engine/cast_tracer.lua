@@ -39,6 +39,22 @@
 --             cleared   slots the body threw away by replacing the deck (RESET)
 --             uncertain the body read game state or used randomness, so what
 --                       it did is only correct for the simulated world
+--             suppressed  the body ran while another card had switched drawing
+--                       off (the first run of a Divide By, an Omega's copies):
+--                       it did its effect but drew nothing
+--             divides   the body returned an iteration count -- the engine's
+--                       own signature of a Divide By, which re-runs the card
+--                       that follows it.  (The only body that returns anything.)
+--             pulled    slots the body itself took out of the deck WITHOUT
+--                       drawing them (Add Trigger's scan, a failed "If ...",
+--                       Divide By's cleanup).  Exact, unlike inferring it from
+--                       what the children cover -- a card that was pulled and
+--                       then brought back by a wrap still counts.
+--             deck_order  the deck at the moment the body started, as a list of
+--                       slots in draw order, and `deck_depleted` the set of
+--                       those slots whose card had no charges left.  This is
+--                       what lets a reader tell WHY a card that scans the deck
+--                       (Add Trigger) stopped where it did.
 --   shot    a nested draw: a trigger's payload, or the cast's root draw.
 --             trigger   "timer" | "hit_world" | "death" | nil (root)
 --   skip    a card was popped but not played.  reason = "depleted" | "mana".
@@ -114,6 +130,19 @@ function M.attach(env, report)
 			if slot then set[slot] = true end
 		end
 		return set
+	end
+
+	-- The deck as drawn: slots in order, plus which of them are out of charges.
+	local function deck_snapshot()
+		local order, depleted = {}, {}
+		for _, card in ipairs(env.deck) do
+			local slot = slot_of(card)
+			if slot then
+				order[#order + 1] = slot
+				if card.uses_remaining == 0 then depleted[slot] = true end
+			end
+		end
+		return order, depleted
 	end
 
 	-- Every place the sandbox consults the (fake) world or the random generator
@@ -220,13 +249,16 @@ function M.attach(env, report)
 			atype = type_name[card.type], rec = rec, iter = iter, draws = {},
 			wrapped_self = via == "draw" and slot ~= nil and after_wrap[slot] or nil,
 			wrapped_draw = wrap_pending or nil,
+			suppressed = env.dont_draw_actions == true or nil,
 		})
+		node.deck_order, node.deck_depleted = deck_snapshot()
 		wrap_pending = false
 		popping = false   -- the card is being played now, no longer being fetched
 		-- Action bodies return nothing, except Divide By's iteration count.
 		local ok, result = pcall(body, ...)
 		close(node)
 		if not ok then error(result, 0) end
+		if result ~= nil then node.divides = true end
 		return result
 	end
 
@@ -344,6 +376,12 @@ function M.attach(env, report)
 			last_removed = removed
 			local slot = slot_of(removed)
 			if slot and cast then after_wrap[slot] = cast.wrapped end
+			-- Not a draw (draw_action sets `popping`): the running body did it.
+			local top = stack[#stack]
+			if slot and not popping and top then
+				top.pulled = top.pulled or {}
+				top.pulled[#top.pulled + 1] = slot
+			end
 		end
 		return removed
 	end

@@ -16,7 +16,13 @@
 --   :clears[..]          RESET and the slots it removed
 --   :dangling            a modifier with nothing left to modify
 --   ~WRAP                the expression wrapped the wand
---   *N                   a re-cast copy, N times     (e.g. Divide By)
+--   *N                   a re-cast copy, N times     (e.g. a Greek letter's copy)
+--                        or, on a head, a card a Divide By ran N times
+--   [Divide..]X          a Divide By chain: the Divide cards lead the head, which
+--                        is the card they re-ran (exact run count after the *)
+--   !reason              an Add Trigger that did nothing: no_target, not_carrier,
+--                        depleted_target;  !plain = it fired its target with no payload
+--   @slots               slots a re-cast copied  (what a Greek letter marks)
 --   W after a cast       the cast wrapped the deck
 
 local here = arg[0]:match("^(.*)[/\\]") or "."
@@ -48,6 +54,10 @@ local function show_node(node)
 	if node.dangling then tag = "dangling" end
 	if node.wrap then tag = tag .. "~WRAP" end
 	if node.recast then tag = tag .. "*" .. tostring(node.count or 1) end
+	if node.runs then tag = tag .. "*" .. tostring(node.runs) end
+	if node.trigger_failed then tag = tag .. "!" .. node.trigger_failed end
+	if node.no_payload then tag = tag .. "!plain" end
+	if node.recast and node.sources then tag = tag .. "@" .. table.concat(node.sources, ",") end
 	local head = mods .. node.id .. (tag ~= "" and (":" .. tag) or "")
 	if node.children and #node.children > 0 then
 		local kids = {}
@@ -127,26 +137,26 @@ check("RANDOM_MODIFIER chains (random pick, nearly all draw 1)",
 -- chain onto the next card. (GAMMA and TAU carry the same dead line.)
 check("ALPHA as the first card copies itself (the engine's own recursion)",
 	{ "ALPHA", "LIGHT_BULLET" }, 1,
-	"{(ALPHA (ALPHA:*1 ALPHA:*1))} | {LIGHT_BULLET}")
+	"{(ALPHA (ALPHA:*1@1 ALPHA:*1@1))} | {LIGHT_BULLET}")
 
 
 -- DIVIDE_* invoke deck[1] directly (no draw_actions call) -> they chain like
 -- a modifier prefix, firing WITH the next card in the same cast.
-check("DIVIDE re-casts the next card: shown as a group with a x2 re-cast",
+check("DIVIDE re-runs the next card: a prefix on it, with the exact run count",
 	{ "DIVIDE_2", "LIGHT_BULLET" }, 1,
-	"{(DIVIDE_2 LIGHT_BULLET:*2)}")
+	"{[DIVIDE_2]LIGHT_BULLET:*2}")
 
 
 check("DIVIDE inside a multicast",
 	{ "BURST_2", "DIVIDE_2", "LIGHT_BULLET", "SPITTER" }, 1,
-	"{(BURST_2:x2 (DIVIDE_2 LIGHT_BULLET:*2) SPITTER)}")
+	"{(BURST_2:x2 [DIVIDE_2]LIGHT_BULLET:*2 SPITTER)}")
 
 
 -- the deck directly instead of force-drawing, so it never pulls the discard
 -- back in. Trailing DAMAGE wraps (see above); trailing DIVIDE must not.
 check("trailing DIVIDE does not wrap and has nothing to re-cast",
 	{ "LIGHT_BULLET", "DIVIDE_2" }, 1,
-	"{LIGHT_BULLET} | {DIVIDE_2}")
+	"{LIGHT_BULLET} | {DIVIDE_2:dangling}")
 
 
 -- End-to-end: a depleted MODIFIER is RETRIED PAST, not filtered out of the deck.
@@ -214,7 +224,7 @@ check("add trigger: payload onto a depleted card is lost, no wrap",
 -- it casts the consumed card plainly and spawns NO trigger (and draws no payload).
 check("add trigger: no card left to trigger, so it fires plainly",
 	{ "ADD_TRIGGER", "LIGHT_BULLET" }, nil,
-	"{[ADD_TRIGGER]LIGHT_BULLET}")
+	"{[ADD_TRIGGER]LIGHT_BULLET:!plain}")
 
 
 -- the modifier it stepped over is still in the deck to be drawn normally.
@@ -222,7 +232,7 @@ check("add trigger: no card left to trigger, so it fires plainly",
 -- drawn -- but that is shot state, not deck consumption, so no bracket says it.)
 check("add trigger: a modifier it steps over is run but stays in the deck",
 	{ "ADD_TRIGGER", "DAMAGE" }, nil,
-	"{(ADD_TRIGGER DAMAGE:*1)} | {[DAMAGE]ADD_TRIGGER:~WRAP}W")
+	"{ADD_TRIGGER:!no_target} | {[DAMAGE]ADD_TRIGGER:~WRAP!no_target}W")
 
 
 -- Add Timer / Add Death Trigger share the body; only the trigger kind differs.
@@ -246,7 +256,7 @@ check("add trigger: modifier before it keeps its place in the prefix",
 -- tools/test_gun_differential.lua, and it is unaffected by this.)
 check("greek wand: re-casts the cards after it, skipping the depleted one",
 	{ "TAU", "LIGHT_BULLET", "DAMAGE", "LIGHT_BULLET" }, 1,
-	"{(TAU LIGHT_BULLET:*1 [DAMAGE]LIGHT_BULLET:*1)} | {LIGHT_BULLET}", { [3] = 0 })
+	"{(TAU LIGHT_BULLET:*1@2 [DAMAGE]LIGHT_BULLET:*1@3)} | {LIGHT_BULLET}", { [3] = 0 })
 
 
 check("reset clears the rest of the wand and ends the cycle",
@@ -337,9 +347,15 @@ passck("a depleted card RESET clears is cleared, not spent",
 -- ---- re-casts ---------------------------------------------------------------
 
 sim = simulate({ "DIVIDE_2", "LIGHT_BULLET" })
-local recast = sim.casts[1].nodes[1].children[1]
-passck("Divide By: one folded child, flagged as a re-cast, counted twice",
-	recast.recast == true and recast.count == 2 and #sim.casts[1].nodes[1].children == 1)
+passck("Divide By: the card it re-ran is the head, run twice, nothing left as a re-cast",
+	sim.casts[1].nodes[1].id == "LIGHT_BULLET" and sim.casts[1].nodes[1].runs == 2
+		and #sim.casts[1].nodes[1].children == 0)
+
+-- a Greek letter's copies stay re-casts, folded when identical, one source each
+sim = simulate({ "LIGHT_BULLET", "ALPHA" })
+local copy = sim.casts[2].nodes[1].children[1]
+passck("a Greek copy: flagged as a re-cast, with the slot it copied",
+	copy.recast == true and copy.count == 1 and copy.sources[1] == 1)
 
 -- ---- mana: straight from the engine's own counter ----------------------------
 
@@ -360,6 +376,113 @@ sim = simulate({ "LIGHT_BULLET" }, 1, nil, { "DAMAGE" })
 passck("always-cast card is traced separately from the deck",
 	#sim.casts[1].always >= 1 and sim.casts[1].always[1].id == "DAMAGE"
 		and sim.casts[1].nodes[1].id == "LIGHT_BULLET")
+
+-- ---- Divide By chains: exact run counts ----------------------------------------
+--
+-- A Divide By runs the card after it N times; when that card is itself a Divide
+-- By the counts multiply.  The engine's own loop does the arithmetic (including
+-- the cut-off that drops a deep Divide By to a single run), the adapter only
+-- pools the runs, so these numbers are what the game fires.
+
+check("divide chain: Divide 3 over Divide 2 over a bullet = 6 shots",
+	{ "DIVIDE_3", "DIVIDE_2", "LIGHT_BULLET", "BOMB" }, 1,
+	"{[DIVIDE_3,DIVIDE_2]LIGHT_BULLET:*6} | {BOMB}")
+check("divide chain: Divide 10 over Divide 4 = 40 shots",
+	{ "DIVIDE_10", "DIVIDE_4", "LIGHT_BULLET" }, 1,
+	"{[DIVIDE_10,DIVIDE_4]LIGHT_BULLET:*40}")
+check("divide chain: three Divide 4 in a row = 64 (below the depth cut-off)",
+	{ "DIVIDE_4", "DIVIDE_4", "DIVIDE_4", "LIGHT_BULLET" }, 1,
+	"{[DIVIDE_4,DIVIDE_4,DIVIDE_4]LIGHT_BULLET:*64}")
+check("divide chain: a modifier before it stays outside the chain",
+	{ "DAMAGE", "DIVIDE_2", "LIGHT_BULLET" }, 1,
+	"{[DAMAGE,DIVIDE_2]LIGHT_BULLET:*2}")
+
+-- The target is still in the deck while Divide By runs it, so a target that
+-- draws (a modifier) pulls ITSELF back off the deck: Damage runs twice from the
+-- Divide By and once more from that draw.  The chain says so rather than
+-- pretending the bullet fired twice.
+sim = simulate({ "DIVIDE_2", "DAMAGE", "LIGHT_BULLET" })
+passck("divide over a modifier: the modifier is the one that repeats",
+	show(sim) == "{[DIVIDE_2,DAMAGE,DAMAGE]LIGHT_BULLET}"
+		and sim.casts[1].nodes[1].link_runs[2] == 2 and sim.casts[1].nodes[1].runs == nil,
+	" (" .. show(sim) .. ")")
+
+sim = simulate({ "DIVIDE_2", "LIGHT_BULLET" })
+passck("a Divide By chain opens its own bracket, over every card it re-runs",
+	sim.casts[1].nodes[1].head == 1 and sim.casts[1].nodes[1].grouped
+		and sim.casts[1].nodes[1].divided
+		and table.concat(sim.casts[1].nodes[1].marked, ",") == "1,2")
+
+-- ---- Greek letters: which card was copied ---------------------------------------
+
+check("alpha copies the first card of the cycle, and says which slot",
+	{ "LIGHT_BULLET", "ALPHA", "BOMB" }, 1,
+	"{LIGHT_BULLET} | {(ALPHA LIGHT_BULLET:*1@1)} | {BOMB}")
+check("gamma copies the LAST card of the deck",
+	{ "BOMB", "LIGHT_BULLET", "GAMMA", "SPITTER", "DAMAGE" }, 1,
+	"{BOMB} | {LIGHT_BULLET} | {(GAMMA [DAMAGE]SPITTER:*1@5)} | {[DAMAGE]BOMB:~WRAP}W")
+check("tau copies the next two cards (here only one is left)",
+	{ "LIGHT_BULLET", "BOMB", "TAU", "SPITTER" }, 1,
+	"{LIGHT_BULLET} | {BOMB} | {(TAU SPITTER:*1@4)} | {SPITTER}")
+check("omega copies everything cast so far, one source per card",
+	{ "LIGHT_BULLET", "BOMB", "OMEGA" }, 1,
+	"{LIGHT_BULLET} | {BOMB} | {(OMEGA LIGHT_BULLET:*1@1 BOMB:*1@2)}")
+
+-- ---- Add Trigger / Add Timer / Add Expiration Trigger ---------------------------
+--
+-- The body steps over modifiers / passives / others / multicasts, applies the
+-- modifiers that still have charges, and lands on a target.  Everything below
+-- is a way that can go differently; `swept` says what happened to each card
+-- it stepped over, `trigger_failed` / `no_payload` say why nothing triggered.
+
+local function first_node(s) return s.casts[1].nodes[1] end
+local function swept_text(node)
+	local out = {}
+	for _, card in ipairs(node.swept or {}) do out[#out + 1] = card.id .. ":" .. card.effect end
+	return table.concat(out, ",")
+end
+
+sim = simulate({ "ADD_TRIGGER", "BURST_2", "ADD_TIMER", "DAMAGE", "LIGHT_BULLET", "BOMB" })
+passck("trigger scan: modifier applied, multicast and scanner stepped over with no effect",
+	swept_text(first_node(sim)) == "BURST_2:ignored,ADD_TIMER:scanner,DAMAGE:applied"
+		and first_node(sim).kind == "trigger" and first_node(sim).trigger == "hit_world",
+	" (" .. swept_text(first_node(sim)) .. ")")
+
+sim = simulate({ "ADD_TRIGGER", "DAMAGE", "LIGHT_BULLET", "BOMB" }, 1, { [2] = 0 })
+passck("trigger scan: a DEPLETED modifier is still discarded, but not applied",
+	swept_text(first_node(sim)) == "DAMAGE:depleted" and first_node(sim).kind == "trigger",
+	" (" .. swept_text(first_node(sim)) .. ")")
+
+check("trigger fails: nothing after it",
+	{ "ADD_TRIGGER" }, 1, "{ADD_TRIGGER:!no_target}")
+sim = simulate({ "ADD_TRIGGER", "SPEED" })
+passck("trigger fails: the scan runs off the end; the modifier it applied stays in the wand",
+	show(sim):find("^{ADD_TRIGGER:!no_target}") ~= nil
+		and swept_text(first_node(sim)) == "SPEED:applied"
+		and first_node(sim).swept[1].consumed == false,
+	" (" .. show(sim) .. ")")
+-- a Greek letter is stepped over (no effect); a card with no trigger version stops the scan
+sim = simulate({ "ADD_TRIGGER", "GAMMA", "QUAD_SHOT", "BOMB" })
+passck("trigger fails: the card it lands on cannot carry a trigger (Quad Shot)",
+	first_node(sim).trigger_failed == "not_carrier"
+		and swept_text(first_node(sim)) == "GAMMA:ignored" and #sim.casts == 3,
+	" (" .. show(sim) .. ")")
+check("trigger fails: the target is out of charges, nothing is consumed",
+	{ "ADD_TRIGGER", "LIGHT_BULLET", "BOMB" }, 1,
+	"{ADD_TRIGGER:!depleted_target} | {BOMB}", { [2] = 0 })
+
+-- plain cast: the target is consumed and fired, but nothing is left to carry
+check("trigger with nothing left to carry fires its target plainly",
+	{ "ADD_TRIGGER", "DAMAGE", "LIGHT_BULLET" }, 1,
+	"{[ADD_TRIGGER,DAMAGE]LIGHT_BULLET:!plain}")
+
+-- the three flavours differ only in WHEN the payload fires
+sim = simulate({ "ADD_TIMER", "LIGHT_BULLET", "BOMB" })
+passck("add timer: payload fires after a delay, with the frame count",
+	first_node(sim).trigger == "timer" and first_node(sim).trigger_frames == 20)
+sim = simulate({ "ADD_DEATH_TRIGGER", "LIGHT_BULLET", "BOMB" })
+passck("add expiration trigger: payload fires when the projectile expires",
+	first_node(sim).trigger == "death")
 
 -- ---- uncertainty -----------------------------------------------------------------
 

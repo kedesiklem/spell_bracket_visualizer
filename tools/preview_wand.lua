@@ -211,7 +211,18 @@ if show_tree then
 	local function lisp(e)
 		local text = (#e.modifiers > 0 and ("[" .. table.concat(e.modifiers, ",") .. "] ") or "")
 			.. pretty(e.id)
-		if e.recast then text = text .. " *" .. (e.count or 1) end
+		if e.recast then
+			text = text .. " *" .. (e.count or 1)
+			if e.sources then text = text .. " (copies slot " .. table.concat(e.sources, ",") .. ")" end
+		end
+		if e.runs then text = text .. " x" .. e.runs end
+		if e.trigger_failed then text = text .. " !" .. e.trigger_failed end
+		if e.no_payload then text = text .. " !plain" end
+		if e.swept then
+			local parts = {}
+			for _, c in ipairs(e.swept) do parts[#parts + 1] = c.id .. ":" .. c.effect end
+			text = text .. " <swept " .. table.concat(parts, ",") .. ">"
+		end
 		if #(e.children or {}) == 0 then return text end
 		local kids = {}
 		for _, c in ipairs(e.children) do kids[#kids + 1] = lisp(c) end
