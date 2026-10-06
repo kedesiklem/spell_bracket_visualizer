@@ -44,6 +44,10 @@
 --   modifiers      ids of the leading cards that attached to the head, outermost
 --                  first -- they sit OUTSIDE the group's brackets, Lisp-style
 --   head           slot of the head card: where the bracket starts
+--   marked         { slot... } the cards a modifier chain ties together -- the
+--                  modifiers and the card they modify (for an Add Trigger scan:
+--                  the trigger, the cards it stepped over and its target).  The
+--                  overlay underlines them as one unit.  Absent on a plain card.
 --   children       expressions gathered by the head (multicast cards, trigger
 --                  payload) followed by the cards the head RE-CAST
 --   recast         true on a child that is a re-cast copy, not a drawn card
@@ -275,6 +279,11 @@ function build_expression(ctx, node)
 	end
 
 	local outer = chain[1] or cur
+	local marked = {}
+	for _, link in ipairs(chain) do
+		if link.slot then marked[#marked + 1] = link.slot end
+	end
+	if cur.via == "draw" and cur.slot then marked[#marked + 1] = cur.slot end
 	local expr = {
 		id = cur.id, atype = cur.atype or ctx.engine.action_type(cur.id) or "OTHER",
 		modifiers = ids_of(chain), kind = "leaf", children = {},
@@ -323,6 +332,8 @@ function build_expression(ctx, node)
 	local function present_as_carried(target_slot, stepped_set)
 		stepped_set[target_slot] = nil
 		expr.scan = true
+		marked = { cur.slot, target_slot }
+		for slot in pairs(stepped_set) do marked[#marked + 1] = slot end
 		expr.id = ctx.tokens[target_slot] or expr.id
 		expr.atype = ctx.engine.action_type(expr.id) or expr.atype
 		expr.modifiers[#expr.modifiers + 1] = cur.id
@@ -363,6 +374,11 @@ function build_expression(ctx, node)
 	for _, node_ in ipairs(own_direct) do recast_nodes[#recast_nodes + 1] = node_ end
 	local recasts = gather_children(ctx, {}, recast_nodes)
 	for _, child in ipairs(recasts) do expr.children[#expr.children + 1] = child end
+
+	if #marked >= 2 then
+		table.sort(marked)
+		expr.marked = marked
+	end
 
 	-- 3. Spans, from what the engine removed while the outermost card ran.
 	return finish(expr, chain, outer)

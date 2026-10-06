@@ -15,6 +15,7 @@
 local sprite_wh_meta = dofile_once("mods/spell_bracket_visualizer/files/wand_sprite_meta.lua") or {}
 local wand_structure = dofile_once("mods/spell_bracket_visualizer/files/wand_structure.lua")
 local wand_sim_cache = dofile_once("mods/spell_bracket_visualizer/files/wand_sim_cache.lua")
+local slot_marks = dofile_once("mods/spell_bracket_visualizer/files/slot_marks.lua")
 local engine_module = dofile_once("mods/spell_bracket_visualizer/files/engine/engine.lua")
 
 -- The cast engine (files/engine/): the game's own gun.lua, run in a sandbox.
@@ -775,6 +776,32 @@ local function plan_delims(groups)
 	return glyphs
 end
 
+-- ---- slot marks: underlines and strike-throughs (planned by slot_marks.lua) ---
+
+local MARK_UNDERLINE_DROP = 2  -- GUI below the bracket hooks' bottom edge; keeps the line
+                               -- clear of the level-0 hooks it would otherwise touch
+local MARK_INSET = 1           -- GUI trimmed off each end, so neighbouring chains stay apart
+local STRIKE_COLOR = { 1.00, 0.30, 0.30 }
+
+-- Draw what slot_marks.collect planned.  Only geometry lives here: which cards
+-- get a mark, and why, is decided in slot_marks.lua.
+local function draw_marks(gui, marks, refw, rows_geo, idc)
+	local function left_of(col) return refw * (BOX.slot0_x + col * BOX.pitch - BOX.halfw) end
+	local function right_of(col) return refw * (BOX.slot0_x + col * BOX.pitch + BOX.halfw) end
+	for _, mark in ipairs(marks) do
+		local yr = rows_geo[mark.row + 1] or rows_geo[1]
+		idc.n = idc.n + 1
+		if mark.kind == "underline" then
+			local x1, x2 = left_of(mark.ca) + MARK_INSET, right_of(mark.cb) - MARK_INSET
+			local y = yr.bot + BRACKET_EXTEND_BOT + MARK_UNDERLINE_DROP
+			line(gui, 72000 + idc.n, x1, y, x2 - x1, 1, COLOR.MODIFIER, 0.9)
+		elseif mark.kind == "strike" then
+			local x1, x2 = left_of(mark.col) + MARK_INSET + 2, right_of(mark.col) - MARK_INSET - 2
+			line(gui, 72000 + idc.n, x1, (yr.top + yr.bot) / 2, x2 - x1, 1, STRIKE_COLOR, 0.9)
+		end
+	end
+end
+
 -- box_right / box_top = the wand box's right and top edges (GUI). They place
 -- the "wraps to front" tag, which is anchored to the BOX rather than to the
 -- bracket it tags -- see the note at the tag below.
@@ -1078,7 +1105,7 @@ end
 -- `uncertain` is the uncertain_brackets setting ("hide"/"show"). Brackets are
 -- withheld from a wand whose structure depended on a guess unless the setting
 -- is "show" -- Track C, docs/ADVANCED_SCENARIOS_PLAN.md 2.
-local function draw_box_brackets(gui, refw, wands, show_probe, uncertain)
+local function draw_box_brackets(gui, refw, wands, show_probe, uncertain, show_marks)
 	local idc = { n = 0 }
 	if show_probe then draw_row_probe(gui, refw, wands) end
 	for _, wd in ipairs(wands) do
@@ -1097,6 +1124,10 @@ local function draw_box_brackets(gui, refw, wands, show_probe, uncertain)
 				end
 				draw_delims(gui, collect_wand_delims(wd.sim, cols, rows),
 					refw, wd.rows_geo, idc, wd.right, wd.top * U * refw)
+				if show_marks ~= false then
+					draw_marks(gui, slot_marks.collect(wd.sim, cols, rows),
+						refw, wd.rows_geo, idc)
+				end
 			else
 				draw_uncertain_glyph(gui, wd, refw)
 			end
@@ -1552,6 +1583,7 @@ function M.update()
 	local get = (type(ModSettingGet) == "function") and ModSettingGet or function() return nil end
 	local show_panel = get("spell_bracket_visualizer.show_grouping") ~= false
 	local show_slots = get("spell_bracket_visualizer.show_slot_brackets") ~= false
+	local show_marks = get("spell_bracket_visualizer.show_slot_marks") ~= false
 	local show_debug = get("spell_bracket_visualizer.show_debug") == true
 	if not show_panel and not show_slots and not show_debug then return end
 	-- Model depleted (0-use) spells the way gun.lua does: ON (default) hands the
@@ -1585,7 +1617,7 @@ function M.update()
 		-- strongly negative z = "bring to front": lower z draws on top, and
 		-- this must beat the engine's spell-frame layer, not just our own gui
 		GuiZSet(gui, -10)
-		draw_box_brackets(gui, refw, boxes, show_debug, uncertain_brackets)
+		draw_box_brackets(gui, refw, boxes, show_debug, uncertain_brackets, show_marks)
 		GuiZSet(gui, 1)
 	end
 
@@ -1656,7 +1688,8 @@ M._test = {
 	collect_wand_delims  = collect_wand_delims,
 	plan_delims     = plan_delims,
 	draw_delims     = draw_delims, -- pixel-level check with a recording Gui stub
-	draw_box_brackets = draw_box_brackets, -- Track C tier suppression, at the draw level
+	draw_box_brackets = draw_box_brackets, -- uncertainty suppression, at the draw level
+	draw_marks      = draw_marks,
 
 	nest_color      = nest_color,
 	WRAP_COLOR      = WRAP_COLOR,

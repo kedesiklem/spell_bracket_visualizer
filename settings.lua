@@ -26,6 +26,13 @@ mod_settings = {
 		scope = MOD_SETTING_SCOPE_RUNTIME,
 	},
 	{
+		id = "show_slot_marks",
+		ui_name = "Slot Marks (underline / strike)",
+		ui_description = "Underlines a modifier chain (the modifiers and the card they\nmodify) in the wand UI, and strikes through cards that are\ndrawn but never fire (depleted spells, cards a failed IF threw\naway).",
+		value_default = true,
+		scope = MOD_SETTING_SCOPE_RUNTIME,
+	},
+	{
 		id = "ignore_depleted_spells",
 		ui_name = "Ignore Depleted Spells",
 		ui_description = "Spells with 0 charges left can't fire. When on (default), the\nwand groups and WRAPS the way the game actually does: a\ndepleted spell is skipped and retried past, so it draws no\nbracket. Turn off to pretend every card fires, depleted or not.",

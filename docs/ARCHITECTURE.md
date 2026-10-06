@@ -73,6 +73,7 @@ shown as a re-cast child (`again: ... xN`), not as part of a bracket.
 | File | Responsibility |
 | --- | --- |
 | `wand_structure.lua` | Re-shapes the raw recording into the expression tree the overlay draws: folds modifiers into their head, groups multicasts, detects the Add Trigger scan, folds identical re-casts, computes slot spans. It decides nothing about game rules. Its header documents the output shape. |
+| `slot_marks.lua` | Plans the extra marks on the slot row (underline a modifier chain, strike a card that never fired). Pure: slots in, columns out. |
 | `wand_sim_cache.lua` | Memoises simulations keyed by the wand's contents, so the engine runs once per change rather than once per frame. |
 
 ### Overlay (`files/`) - "how is it drawn?"
@@ -88,7 +89,7 @@ shown as a re-cast child (`again: ... xN`), not as part of a bracket.
 | --- | --- |
 | `test_support.lua` | Loader and engine factory shared by every offline test. |
 | `test_wand_structure.lua` | Expression-shape tests against the real engine. |
-| `test_slot_delims.lua`, `test_panel_rows.lua`, `test_font_compat.lua` | Bracket planner, panel row clamp, font-safety layout. |
+| `test_slot_delims.lua`, `test_slot_marks.lua`, `test_panel_rows.lua`, `test_font_compat.lua` | Bracket planner, mark planner, panel row clamp, font-safety layout. |
 | `preview_wand.lua` | Print any wand's brackets and expression tree in the terminal. |
 | `extract_gun.py` | Copy `gun.lua` and friends out of the player's `data.wak` into the git-ignored `.gun_ref/`. |
 

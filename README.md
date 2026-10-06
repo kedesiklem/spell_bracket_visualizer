@@ -96,6 +96,9 @@ All settings are runtime-scoped and apply immediately.
   (Japanese, …) the game ignores the smaller sizes; the panel detects that and
   switches itself to **Large** automatically (see `docs/FONT_COMPAT.md`).
 - **Slot Brackets** — the in-UI rainbow brackets (on by default).
+- **Slot Marks** — an underline under a modifier chain (the modifiers and the
+  card they modify) and a red strike through cards that are drawn but never
+  fire: depleted spells, cards a failed IF threw away (on by default).
 - **Ignore Depleted Spells** — model spells with 0 charges the way the game
   does it (they're skipped and the next card drawn instead), giving the right
   wand structure and wrap points. Turn off to pretend every card fires,
@@ -122,12 +125,14 @@ files/engine/                   # runs the game's own gun.lua in a sandbox
   lua_compat.lua                #   LuaJIT / Lua 5.3 differences
 files/wand_structure.lua        # re-shapes the recording into the expression tree
 files/wand_sim_cache.lua        # one simulation per wand change, not per frame
+files/slot_marks.lua            # which cards get an underline / strike-through (pure)
 files/grouping_overlay.lua      # reads the live wand + draws panel / slot brackets
 files/wand_sprite_meta.lua      # generated wand sprite sizes (box layout)
 tools/test_support.lua          # shared loader / engine factory for the tests
 tools/test_wand_structure.lua   # expression-shape tests against the real engine
 tools/test_slot_delims.lua      # slot-bracket planner (nesting, casts, wrap)
 tools/test_panel_rows.lua       # panel row clamp (+N more fold, sticky legend)
+tools/test_slot_marks.lua       # underline / strike planning + drawing
 tools/test_font_compat.lua      # non-pixel-font layout checks
 tools/preview_wand.lua          # print any wand's brackets / tree, no game needed
 tools/extract_gun.py            # copy gun.lua etc. out of data.wak into .gun_ref/
@@ -151,9 +156,11 @@ workshop.xml                    # Steam Workshop manifest (name/desc/tags/exclud
 4. `lua tools/test_slot_delims.lua` runs the real slot-bracket planner —
    nesting depth, cast brackets, the wrap enclosure, stacking on a shared card
    edge, wands with empty slots.
-5. `lua tools/test_panel_rows.lua` runs the real panel row clamp — the
+5. `lua tools/test_slot_marks.lua` runs the underline / strike planner and its
+   drawing against the real engine.
+6. `lua tools/test_panel_rows.lua` runs the real panel row clamp — the
    `... +N more` fold and the sticky `?` legend that has to survive it.
-6. `lua tools/test_font_compat.lua` validates the non-pixel-font fixes
+7. `lua tools/test_font_compat.lua` validates the non-pixel-font fixes
    (`docs/FONT_COMPAT.md`) by driving the real panel layout with stubbed
    pixel-like / zero-measuring / nil-returning fonts, then prints the in-game
    checklist for verifying against the Better Font mod or a TTF language.

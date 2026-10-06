@@ -152,6 +152,7 @@ Report issues at:
   files\grouping_overlay.lua .. reads the live wand, draws panel + brackets
   files\wand_structure.lua .... shapes the engine's recording into a tree
   files\wand_sim_cache.lua .... remembers simulations between frames
+  files\slot_marks.lua ........ plans the underlines / strike-throughs on cards
   files\engine\ ............... runs the game's own cast code (gun.lua) in a
                                 sandbox and records what it does
   files\wand_sprite_meta.lua .. generated wand-sprite sizes (box layout)

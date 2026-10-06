@@ -28,6 +28,7 @@ payload=(
 	files/grouping_overlay.lua
 	files/wand_structure.lua
 	files/wand_sim_cache.lua
+	files/slot_marks.lua
 	files/engine/lua_compat.lua
 	files/engine/engine_stubs.lua
 	files/engine/game_env.lua
