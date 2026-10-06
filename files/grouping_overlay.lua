@@ -267,8 +267,8 @@ end
 -- or called an engine function the sandbox does not model -- gets the same "?".
 -- `uncertain` is the set of such ids the engine reported for this expression
 -- (wand_structure.lua: uncertain_ids); nil means nothing was uncertain.
-local function dyn_name(id, rows, uncertain)
-	local name = display_name(id)
+local function dyn_name(id, rows, uncertain, name_of)
+	local name = (name_of or display_name)(id)
 	if uncertain and uncertain[id] then
 		rows.any_dynamic = true
 		return name .. "?"
@@ -285,13 +285,102 @@ local function fmt(n)
 	return tostring(n)
 end
 
--- ---- wording for the cards that need more than a name -----------------------
+-- ---- wording: full sentences, or a compact shorthand -------------------------
+--
+-- Every phrase the panel adds around a spell name lives here, in two sets: the
+-- default reads as English, the compact set (setting "Compact Panel Text") says
+-- the same in a few characters, for a narrow panel or a long wand.  Nothing
+-- outside this table knows which one is in use -- walk() is handed one.
+-- ASCII only: the game's pixel font has no glyphs for anything fancier.
+
+-- Shorter names for the spells the panel mentions most.  Anything not listed
+-- keeps its in-game name.
+local COMPACT_NAMES = {
+	ADD_TRIGGER = "+Trig", ADD_TIMER = "+Timer", ADD_DEATH_TRIGGER = "+Exp",
+}
+local function compact_name(id)
+	local n = id:match("^DIVIDE_(%d+)$")
+	if n then return "D" .. n end
+	n = id:match("^BURST_(%d+)$")
+	if n then return "x" .. n end
+	return COMPACT_NAMES[id] or display_name(id)
+end
+
+local WORDS = {}
+
+WORDS.full = {
+	name = display_name,
+	recast = function(label, count, sources)
+		local out = "again: " .. label
+		if count and count > 1 then out = out .. "  x" .. count end
+		if sources and #sources > 0 then
+			out = out .. "  (copies slot" .. (#sources > 1 and "s " or " ")
+				.. table.concat(sources, ", ") .. ")"
+		end
+		return out
+	end,
+	dangling = "  (no projectile)",
+	divides_nothing = "  (nothing to repeat)",
+	silent = function(n) return " (" .. n .. " draw nothing)" end,
+	failure = {
+		no_target       = "  (fails: no spell after it to attach to)",
+		not_carrier     = "  (fails: the next spell can't carry a trigger)",
+		depleted_target = "  (fails: the spell it would carry has no charges left)",
+	},
+	plain = "  (no spell left to carry: fires plain)",
+	skips = function(n) return "  (skips " .. n .. (n == 1 and " spell)" or " spells)") end,
+	clears = function(n) return "  (clears " .. n .. " spells)" end,
+	clears_nothing = "  (nothing left to clear)",
+	effect = {
+		applied  = " (applied)",
+		depleted = " (no charges, no effect)",
+		ignored  = " (no effect)",
+		scanner  = " (no effect)",
+	},
+	swept_lead = { kept = "stepped over, kept in the wand: ", gone = "stepped over, discarded: " },
+	swept_sep = ", ",
+	trigger = {
+		hit = "on hit:", death = "on expiration:", delay = "after a delay:",
+		timer = function(frames) return string.format("after %.2gs:", frames / 60) end,
+	},
+}
+
+WORDS.compact = {
+	name = compact_name,
+	recast = function(label, count, sources)
+		local out = "* " .. label
+		if count and count > 1 then out = out .. " x" .. count end
+		if sources and #sources > 0 then out = out .. " @" .. table.concat(sources, ",") end
+		return out
+	end,
+	dangling = " (none)",
+	divides_nothing = " (none)",
+	silent = function(n) return " (" .. n .. " silent)" end,
+	failure = {
+		no_target       = " (! no target)",
+		not_carrier     = " (! no carrier)",
+		depleted_target = " (! no charges)",
+	},
+	plain = " (! plain)",
+	skips = function(n) return " (skip " .. n .. ")" end,
+	clears = function(n) return " (clears " .. n .. ")" end,
+	clears_nothing = " (nothing)",
+	effect = { applied = "+", depleted = "0", ignored = "-", scanner = "-" },
+	swept_lead = { kept = "kept: ", gone = "swept: " },
+	swept_sep = " ",
+	trigger = {
+		hit = "hit:", death = "exp:", delay = "timer:",
+		timer = function(frames) return string.format("%.2gs:", frames / 60) end,
+	},
+	-- one sticky line decoding the symbols, shown only when one is on screen
+	legend = "* re-cast  @ copied slot  + applied  0 no charges  - no effect  ! failed",
+}
 
 -- Leading cards, as names.  Identical neighbours are folded ("Damage x3"): a
 -- Divide By runs the card after it several times, and chained Divide By cards
 -- of the same size read better as a count than as a stutter.  `link_runs`
 -- (wand_structure.lua) says how often a modifier was re-run.
-local function modifier_names(node, rows)
+local function modifier_names(node, rows, words)
 	local mods, names = node.modifiers or {}, {}
 	local i = 1
 	while i <= #mods do
@@ -301,105 +390,75 @@ local function modifier_names(node, rows)
 			count = count + ((node.link_runs and node.link_runs[j]) or 1)
 			j = j + 1
 		end
-		local name = dyn_name(mods[i], rows, node.uncertain_ids)
+		local name = dyn_name(mods[i], rows, node.uncertain_ids, words.name)
 		names[#names + 1] = count > 1 and (name .. " x" .. count) or name
 		i = j
 	end
 	return names
 end
 
--- Why an Add Trigger / Add Timer / Add Expiration Trigger did nothing.
-local TRIGGER_FAILURE = {
-	no_target       = "no spell after it to attach to",
-	not_carrier     = "the next spell can't carry a trigger",
-	depleted_target = "the spell it would carry has no charges left",
-}
-
--- What happened to a card an Add Trigger stepped over.
-local SWEPT_EFFECT = {
-	applied  = "applied",
-	depleted = "no charges, no effect",
-	ignored  = "no effect",
-	scanner  = "no effect",
-}
-
 -- One note listing the cards a scan stepped over, with what each did.  When the
 -- scan succeeded they were discarded with the target (charges untouched); when
 -- it failed they are all still in the wand.
-local function swept_note(node)
+local function swept_note(node, words)
 	local parts = {}
 	for _, card in ipairs(node.swept) do
-		parts[#parts + 1] = display_name(card.id) .. " (" .. SWEPT_EFFECT[card.effect] .. ")"
+		parts[#parts + 1] = words.name(card.id) .. words.effect[card.effect]
 	end
-	local lead = node.trigger_failed and "stepped over, kept in the wand: "
-		or "stepped over, discarded: "
-	return lead .. table.concat(parts, ", ")
+	local lead = node.trigger_failed and words.swept_lead.kept or words.swept_lead.gone
+	return lead .. table.concat(parts, words.swept_sep)
 end
 
 -- "on hit" / "after 0.33s" / "on expiration": when a trigger's payload fires.
-local function trigger_note(node)
+local function trigger_note(node, words)
+	local t = words.trigger
 	if node.trigger == "timer" then
-		if node.trigger_frames then
-			return string.format("after %.2gs:", node.trigger_frames / 60)
-		end
-		return "after a delay:"
+		return node.trigger_frames and t.timer(node.trigger_frames) or t.delay
 	elseif node.trigger == "death" then
-		return "on expiration:"
+		return t.death
 	end
-	return "on hit:"
+	return t.hit
 end
 
--- Where a re-cast copy came from: the slots of the cards a Greek letter (or
--- Double Spell...) copied.
-local function copy_note(node)
-	if not node.sources or #node.sources == 0 then return "" end
-	return "  (copies slot" .. (#node.sources > 1 and "s " or " ")
-		.. table.concat(node.sources, ", ") .. ")"
-end
-
-local function walk(rows, node, ancestor_colors, depth)
+local function walk(rows, node, ancestor_colors, depth, words)
 	local mods = ""
-	local names = modifier_names(node, rows)
+	local names = modifier_names(node, rows, words)
 	if #names > 0 then mods = "[" .. table.concat(names, ", ") .. "] " end
 
-	local name = dyn_name(node.id, rows, node.uncertain_ids)
+	local name = dyn_name(node.id, rows, node.uncertain_ids, words.name)
 	-- no "xN" / "(trig N)" suffixes (user calls, 2026-06-11): the spell name
 	-- already says it and the indented children below show what was gathered
 	-- or carried as payload.  The one count that IS shown is how often the engine
 	-- ran a card: a re-cast copy, or the target of a Divide By chain.
 	local label = mods .. name
 	if node.dangling then
-		label = label .. (node.divides_nothing and "  (nothing to repeat)" or "  (no projectile)")
+		label = label .. (node.divides_nothing and words.divides_nothing or words.dangling)
 	end
 	if node.runs then
 		label = label .. "  x" .. node.runs
-		if node.silent_runs then label = label .. " (" .. node.silent_runs .. " draw nothing)" end
+		if node.silent_runs then label = label .. words.silent(node.silent_runs) end
 	end
 	-- A card the engine re-ran (a Greek letter's copy, Alpha's self-copy, ...) is
 	-- not in the deck a second time: say it was re-cast, how often, and from where.
 	if node.recast then
-		label = "again: " .. label
-		if node.count and node.count > 1 then label = label .. "  x" .. node.count end
-		label = label .. copy_note(node)
+		label = words.recast(label, node.count, node.sources)
+		rows.any_recast = true
 	end
 	-- Add Trigger family: failed (nothing consumed) or fired its target plainly.
 	if node.trigger_failed then
-		label = label .. "  (fails: " .. TRIGGER_FAILURE[node.trigger_failed] .. ")"
+		label = label .. words.failure[node.trigger_failed]
+		rows.any_symbol = true
 	elseif node.no_payload then
-		label = label .. "  (no spell left to carry: fires plain)"
+		label = label .. words.plain
+		rows.any_symbol = true
 	end
 	-- Cards a spell threw away without casting them (a failed "If ...").
 	if node.skipped and #node.skipped > 0 then
-		label = label .. "  (skips " .. #node.skipped
-			.. (#node.skipped == 1 and " spell)" or " spells)")
+		label = label .. words.skips(#node.skipped)
 	end
 	if node.kind == "reset" then
 		local n = node.cleared and #node.cleared or 0
-		if n > 0 then
-			label = label .. "  (clears " .. n .. " spells)"
-		else
-			label = label .. "  (nothing left to clear)"
-		end
+		label = label .. (n > 0 and words.clears(n) or words.clears_nothing)
 	end
 	if node.wrap then label = "~ " .. label end
 
@@ -410,11 +469,14 @@ local function walk(rows, node, ancestor_colors, depth)
 	local function note(text)
 		rows[#rows + 1] = { bars = copy_list(child_colors), label = text, color = INFO_COLOR }
 	end
-	if node.swept and #node.swept > 0 then note(swept_note(node)) end
-	if node.kind == "trigger" and node.trigger then note(trigger_note(node)) end
+	if node.swept and #node.swept > 0 then
+		note(swept_note(node, words))
+		rows.any_symbol = true
+	end
+	if node.kind == "trigger" and node.trigger then note(trigger_note(node, words)) end
 
 	if node.children and #node.children > 0 then
-		for _, ch in ipairs(node.children) do walk(rows, ch, child_colors, depth + 1) end
+		for _, ch in ipairs(node.children) do walk(rows, ch, child_colors, depth + 1, words) end
 	end
 end
 
@@ -440,8 +502,9 @@ end
 -- wrap/recharge banner, and the sticky footnotes ("?" tiers, mana overflow,
 -- the bracket-definition legend). `uncertain_ids` are the cards whose
 -- behaviour the engine had to guess (wand_structure.uncertain_ids); nil is fine.
-local function sim_rows(sim, cfg, always, uncertain_ids)
+local function sim_rows(sim, cfg, always, uncertain_ids, compact)
 	local rows = {}
+	local words = compact and WORDS.compact or WORDS.full
 	if sim.error then
 		rows[1] = { bars = {}, label = "cannot simulate: " .. tostring(sim.error),
 			color = WRAP_COLOR }
@@ -453,7 +516,7 @@ local function sim_rows(sim, cfg, always, uncertain_ids)
 		local names = {}
 		-- through dyn_name: an always-cast Random Spell / If is just as
 		-- unpredictable as one in the deck, and must carry the same "?".
-		for _, id in ipairs(always) do names[#names + 1] = dyn_name(id, rows, always_uncertain) end
+		for _, id in ipairs(always) do names[#names + 1] = dyn_name(id, rows, always_uncertain, words.name) end
 		rows[#rows + 1] = { bars = {}, label = "always: " .. table.concat(names, ", "),
 			color = COLOR.PASSIVE }
 	end
@@ -497,7 +560,7 @@ local function sim_rows(sim, cfg, always, uncertain_ids)
 				color = (cast.wrapped or over) and WRAP_COLOR or HEADER_COLOR, header = true }
 		end
 		local spine = show_headers and { HEADER_COLOR } or {}
-		for _, node in ipairs(cast.nodes) do walk(rows, node, spine, 0) end
+		for _, node in ipairs(cast.nodes) do walk(rows, node, spine, 0, words) end
 	end
 	-- sticky: these explain marks/warnings that survive the row clamp, so they
 	-- must outlive the "... +N more" cut rather than being the first lines
@@ -518,6 +581,10 @@ local function sim_rows(sim, cfg, always, uncertain_ids)
 		rows[#rows + 1] = { bars = {},
 			label = "mana = cost of this cast; > max means part of it is discarded",
 			color = COLOR.OTHER, sticky = true }
+	end
+	-- the compact shorthand needs a key, but only when a symbol is on screen
+	if compact and (rows.any_recast or rows.any_symbol) then
+		rows[#rows + 1] = { bars = {}, label = words.legend, color = COLOR.OTHER, sticky = true }
 	end
 	-- the bracket-definition legend (Track B, docs/ADVANCED_SCENARIOS_PLAN.md
 	-- 1): always present whenever there's at least one cast to explain.
@@ -1908,6 +1975,7 @@ function M.update()
 	-- engine the live charge counts, so a depleted card is retried past (no
 	-- bracket on it); OFF pretends every card fires.
 	local ignore_depleted = get("spell_bracket_visualizer.ignore_depleted_spells") ~= false
+	local compact_text = get("spell_bracket_visualizer.compact_panel") == true
 	local panel_scale = PANEL_SCALE_MAP[get("spell_bracket_visualizer.panel_text_size") or "small"] or 0.6
 	-- Track C: "hide" (default) withholds slot brackets on a wand whose tier
 	-- is worse than exact; "show" draws them anyway. See draw_box_brackets.
@@ -1978,7 +2046,7 @@ function M.update()
 			if key_pressed(KEY_PAGEUP) then panel_view.scroll = panel_view.scroll - SCROLL_STEP end
 			if key_pressed(KEY_HOME) then panel_view.hidden = not panel_view.hidden end
 			panel_view.mouse = read_pointer(sw, sh)
-			draw_panel(gui, sim_rows(wd.sim, wd.cfg, wd.always, wd.uncertain_ids),
+			draw_panel(gui, sim_rows(wd.sim, wd.cfg, wd.always, wd.uncertain_ids, compact_text),
 				title, sw, sh, anchor, panel_scale, panel_view)
 		end
 	end

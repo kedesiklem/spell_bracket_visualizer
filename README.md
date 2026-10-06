@@ -96,6 +96,13 @@ All settings are runtime-scoped and apply immediately.
   font mod (e.g. Better Font) or a language with a smooth non-pixel font
   (Japanese, …) the game ignores the smaller sizes; the panel detects that and
   switches itself to **Large** automatically (see `docs/FONT_COMPAT.md`).
+- **Wand Structure Panel: Compact Text** — the same facts in fewer characters:
+  `D10` for Divide by 10, `x2` for Double spell, `*` for a re-cast with `@3`
+  for "copied slot 3", `(! no target)` for a failed Add Trigger, and symbols
+  (`+` applied, `0` no charges, `-` no effect) for the cards a trigger stepped
+  over. A one-line key appears under the structure only when a symbol is on
+  screen. Off by default; all wording lives in one table (`WORDS` in
+  `grouping_overlay.lua`).
 - **Panel size and reading** — the panel has a fixed, comfortable width that does
   not depend on the wand next to it (it may overlap a big wand's box: hide it
   to uncover the slots). Click the title (or press **Home**) to hide it down to

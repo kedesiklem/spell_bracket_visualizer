@@ -604,6 +604,68 @@ do
 		"[Add Trigger] Light Bullet  (no spell left to carry: fires plain)")
 end
 
+-- ---- compact text: the same facts in a few characters --------------------------
+do
+	local function rows_of(node, compact)
+		node.modifiers = node.modifiers or {}
+		node.children = node.children or {}
+		local sim = { casts = { { nodes = { node }, wrapped = false, mana = 0 } }, wrapped = false }
+		return T.sim_rows(sim, { spells_per_cast = 1 }, {}, nil, compact)
+	end
+	local function labels(node)
+		local out = {}
+		for _, r in ipairs(rows_of(node, true)) do
+			if not r.sticky then out[#out + 1] = r.label end
+		end
+		return out
+	end
+	local function legend(node)
+		for _, r in ipairs(rows_of(node, true)) do
+			if r.sticky and r.label:find("re-cast", 1, true) then return r end
+		end
+	end
+
+	eq("compact: Divide By becomes D<n>, folded and counted",
+		labels({ kind = "leaf", id = "LIGHT_BULLET", atype = "PROJECTILE",
+			modifiers = { "DIVIDE_10", "DIVIDE_10", "DIVIDE_4" }, runs = 400 })[1],
+		"[D10 x2, D4] Light Bullet  x400")
+	eq("compact: a multicast is x<n>",
+		labels({ kind = "multicast", id = "BURST_3", atype = "DRAW_MANY", group = 3 })[1], "x3")
+
+	local copy_rows = labels({ kind = "leaf", id = "ALPHA", atype = "OTHER", children = {
+		{ kind = "leaf", id = "LIGHT_BULLET", atype = "PROJECTILE", recast = true,
+			count = 2, sources = { 1, 3 }, modifiers = {}, children = {} } } })
+	eq("compact: a re-cast is a star, with its sources after an @",
+		copy_rows[2], "* Light Bullet x2 @1,3")
+
+	local failed = labels({ kind = "leaf", id = "ADD_TRIGGER", atype = "OTHER",
+		trigger_failed = "no_target",
+		swept = { { id = "DAMAGE", slot = 2, effect = "applied", consumed = false } } })
+	eq("compact: a failed trigger", failed[1], "+Trig (! no target)")
+	eq("compact: what it stepped over, as symbols", failed[2], "kept: Damage+")
+
+	local ok = labels({ kind = "trigger", id = "LIGHT_BULLET", atype = "PROJECTILE",
+		trigger = "timer", trigger_frames = 20, payload = 1,
+		modifiers = { "ADD_TIMER", "BURST_2", "DAMAGE" },
+		swept = { { id = "BURST_2", slot = 2, effect = "ignored", consumed = true },
+			{ id = "DAMAGE", slot = 3, effect = "depleted", consumed = true } },
+		children = { { kind = "leaf", id = "BOMB", atype = "PROJECTILE", modifiers = {}, children = {} } } })
+	eq("compact: the discarded cards", ok[2], "swept: x2- Damage0")
+	eq("compact: when the payload fires", ok[3], "0.33s:")
+
+	eq("compact: a key is shown when a symbol is on screen",
+		legend({ kind = "leaf", id = "ALPHA", atype = "OTHER", children = {
+			{ kind = "leaf", id = "BOMB", atype = "PROJECTILE", recast = true, count = 1,
+				sources = { 1 }, modifiers = {}, children = {} } } }) ~= nil, true)
+	eq("compact: ...and the key is sticky", (legend({ kind = "leaf", id = "ALPHA", atype = "OTHER",
+		children = { { kind = "leaf", id = "BOMB", atype = "PROJECTILE", recast = true, count = 1,
+			sources = { 1 }, modifiers = {}, children = {} } } }) or {}).sticky, true)
+	eq("compact: no key when nothing symbolic is shown",
+		legend({ kind = "leaf", id = "LIGHT_BULLET", atype = "PROJECTILE" }), nil)
+	eq("normal text is untouched by the compact set",
+		rows_of({ kind = "leaf", id = "DIVIDE_10", atype = "OTHER" }, false)[1].label, "Divide 10")
+end
+
 print("")
 print(failures .. " failure(s)")
 os.exit(failures == 0 and 0 or 1)
