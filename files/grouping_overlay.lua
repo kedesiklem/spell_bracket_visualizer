@@ -2022,7 +2022,7 @@ function M.update()
 	-- bracket on it); OFF pretends every card fires.
 	local ignore_depleted = get("spell_bracket_visualizer.ignore_depleted_spells") ~= false
 	local compact_text = get("spell_bracket_visualizer.compact_panel") == true
-	local hide_legend = get("spell_bracket_visualizer.show_legend") ~= true
+	local hide_legend = get("spell_bracket_visualizer.show_legend") == false
 	local panel_scale = PANEL_SCALE_MAP[get("spell_bracket_visualizer.panel_text_size") or "small"] or 0.6
 	-- Track C: "hide" (default) withholds slot brackets on a wand whose tier
 	-- is worse than exact; "show" draws them anyway. See draw_box_brackets.

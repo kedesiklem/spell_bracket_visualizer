@@ -28,8 +28,8 @@ mod_settings = {
 	{
 		id = "show_legend",
 		ui_name = "Wand Structure Panel: Legend",
-		ui_description = "Show the explanatory lines at the bottom of the panel (what [ ],\n? and the mana line mean, and the key to the compact text's\nsymbols). Off by default: warnings about uncertain spells stay.",
-		value_default = false,
+		ui_description = "Show the explanatory lines at the bottom of the panel (what [ ],\n? and the mana line mean, and the key to the compact text's\nsymbols). ON by default: when OFF, warnings about uncertain spells stay.",
+		value_default = true,
 		scope = MOD_SETTING_SCOPE_RUNTIME,
 	},
 	{
