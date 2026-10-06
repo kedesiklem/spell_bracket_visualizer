@@ -303,7 +303,7 @@ local function compact_name(id)
 	local n = id:match("^DIVIDE_(%d+)$")
 	if n then return "D" .. n end
 	n = id:match("^BURST_(%d+)$")
-	if n then return "x" .. n end
+	if n then return "draw " .. n end
 	return COMPACT_NAMES[id] or display_name(id)
 end
 
@@ -353,13 +353,13 @@ WORDS.compact = {
 	name = compact_name,
 	recast = function(label, count, sources)
 		local out = "* " .. label
-		if count and count > 1 then out = out .. " \195\151" .. count end
+		if count and count > 1 then out = out .. " x" .. count end
 		if sources and #sources > 0 then out = out .. " @" .. table.concat(sources, ",") end
 		return out
 	end,
-	-- U+00D7 (UTF-8 bytes C3 97), not "x": in compact text "x2" already means
-	-- a two-card multicast, and a run count must not read as one.
-	times = function(n) return " \195\151" .. n end,
+	-- "x" is the repeat count; a multicast is spelled "draw N" (compact_name),
+	-- so the two never read alike.  (U+00D7 was tried: Noita's font shows it as "?".)
+	times = function(n) return " x" .. n end,
 	divisor = function(n) return "D" .. n end,
 	dangling = " (none)",
 	divides_nothing = " (none)",

@@ -21,7 +21,7 @@ mod_settings = {
 	{
 		id = "compact_panel",
 		ui_name = "Wand Structure Panel: Compact Text",
-		ui_description = "Say it in fewer characters: D10 for Divide by 10, x2 for Double\nspell, * for a re-cast, @3 for 'copied slot 3', (! no target)\nfor a failed Add Trigger... A one-line key appears under the\nstructure when a symbol is on screen.",
+		ui_description = "Say it in fewer characters: D10 for Divide by 10, draw 2 for Double\nspell, x3 for a repeat count, * for a re-cast, @3 for 'copied slot 3', (! no target)\nfor a failed Add Trigger... A one-line key appears under the\nstructure when a symbol is on screen.",
 		value_default = false,
 		scope = MOD_SETTING_SCOPE_RUNTIME,
 	},

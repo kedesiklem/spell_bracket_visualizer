@@ -97,8 +97,8 @@ All settings are runtime-scoped and apply immediately.
   (Japanese, …) the game ignores the smaller sizes; the panel detects that and
   switches itself to **Large** automatically (see `docs/FONT_COMPAT.md`).
 - **Wand Structure Panel: Compact Text** — the same facts in fewer characters:
-  `D10` for Divide by 10, `x2` for Double spell (a run or application count is
-  written `×3`, so the two never get confused), `*` for a re-cast with `@3`
+  `D10` for Divide by 10, `draw 2` for Double spell (`x3` is a repeat count, so the two never get
+  confused), `*` for a re-cast with `@3`
   for "copied slot 3", `(! no target)` for a failed Add Trigger, and symbols
   (`+` applied, `0` no charges, `-` no effect) for the cards a trigger stepped
   over. A one-line key appears under the structure only when a symbol is on
