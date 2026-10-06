@@ -1,17 +1,17 @@
 #!/usr/bin/env lua5.4
--- Validates the wand-structure panel's ROW CLAMP against the REAL
--- files/grouping_overlay.lua, by stubbing the game's Gui API and recording
--- what draw_panel actually draws.
+-- Validates the wand-structure panel's LAYOUT against the REAL
+-- files/grouping_overlay.lua, by stubbing the game's Gui API and recording what
+-- draw_panel actually draws.
 --
 --     lua tools/test_panel_rows.lua        (any Lua 5.1+ / LuaJIT)
 --
--- What's at stake: a structure too long for the screen folds its tail into one
--- "... +N more" line. The "?" legend ("depends on game state when cast") is
--- appended LAST, so a naive tail-cut drops the legend while the "?" marks it
--- explains stay on screen above it -- unexplained. Rows may set sticky=true to
--- be held back from the cut and re-appended after it; the "+N more" count then
--- has to be over the CONTENT rows only, or it silently misreports how much was
--- hidden. Both halves are pure arithmetic, and both are off-by-one bait.
+-- What's at stake: a structure too long for the screen SCROLLS instead of being
+-- folded.  The "?" legend ("depends on game state when cast") is appended LAST
+-- and explains marks that stay on screen, so rows may set sticky=true to stay
+-- put under the scrolling part -- otherwise a scroll would hide the legend while
+-- the marks it explains remain visible.  The panel keeps a fixed, comfortable
+-- width whatever the wand next to it looks like, can be hidden down to a tab,
+-- and keeps its tooltip / click-to-wrap for long rows.
 
 local here = arg[0]:match("^(.*)[/\\]") or "."
 local MOD = here .. "/.."
@@ -27,7 +27,10 @@ end
 local drawn -- { texts = { {x, y, text, scale}, ... } }
 function GuiZSet() end
 function GuiColorSetForNextWidget() end
-function GuiImageNinePiece() end
+function GuiImage() end
+function GuiImageNinePiece(gui, id, x, y, w, h)
+	if id == 90210 then drawn.box = { x = x, y = y, w = w, h = h } end
+end
 function GuiText(gui, x, y, text, scale)
 	drawn.texts[#drawn.texts + 1] = { x = x, y = y, text = text, scale = scale }
 end
@@ -64,15 +67,18 @@ local function same_color(a, b)
 	return a and b and a[1] == b[1] and a[2] == b[2] and a[3] == b[3]
 end
 
--- Drive the real draw_panel and return just the row labels it drew (the title
--- and the "|" nesting spines are not rows).
-local function render(rows, sh)
+-- Drive the real draw_panel and return just the row labels it drew (the title,
+-- its "[-]" button and the "|" nesting spines are not rows).
+local CHROME = { ["|"] = true, ["[-]"] = true }
+local function is_row(t) return t.text ~= TITLE and not CHROME[t.text] end
+
+local function render(rows, sh, view, right)
 	drawn = { texts = {} }
-	local anchor = { boxes = { { top = 48, right = 400 } }, sel = 1 }
-	T.draw_panel(nil, rows, TITLE, 640, sh or 360, anchor, 1.0)
+	local anchor = { boxes = { { top = 48, right = right or 400 } }, sel = 1 }
+	T.draw_panel(nil, rows, TITLE, 640, sh or 360, anchor, 1.0, view)
 	local labels = {}
 	for _, t in ipairs(drawn.texts) do
-		if t.text ~= TITLE and t.text ~= "|" then labels[#labels + 1] = t.text end
+		if is_row(t) then labels[#labels + 1] = t.text end
 	end
 	return labels
 end
@@ -90,79 +96,60 @@ local function with_legend(rows)
 	return rows
 end
 
-local function count_more(labels)
-	local n, text = 0, nil
+local HINT = "PgUp/PgDn: scroll   Home: hide"
+local function spells_in(labels)
+	local out = {}
 	for _, l in ipairs(labels) do
-		if l:match("^%.%.%. %+%d+ more$") then n = n + 1; text = l end
+		if l:match("^spell %d+$") then out[#out + 1] = tonumber(l:match("%d+")) end
 	end
-	return n, text and tonumber(text:match("%+(%d+)")) or nil
+	return out
 end
 
--- ---- 1. short structure: nothing is cut, the legend sits last ---------------
+-- ---- 1. short structure: nothing scrolls, the legend sits last ---------------
 
 local labels = render(with_legend(content_rows(3)), 360)
 eq("short: every row drawn", #labels, 4)
 eq("short: legend is last", labels[#labels], LEGEND)
-eq("short: no '+N more' line", (count_more(labels)), 0)
+eq("short: no scroll hint", labels[#labels] ~= HINT, true)
 
--- ---- 2. long structure WITH the sticky legend -------------------------------
---
--- The legend must survive the cut and stay last, and the "+N more" count must
--- describe the CONTENT rows hidden -- not count the legend as content.
+-- ---- 2. long structure: it scrolls, the legend stays under it ----------------
 
-labels = render(with_legend(content_rows(200)), 360)
-local n_more, hidden = count_more(labels)
-eq("clamped: exactly one '+N more' line", n_more, 1)
-eq("clamped: legend survives the cut", labels[#labels], LEGEND)
+labels = render(with_legend(content_rows(200)), 360, { scroll = 0 })
+eq("long: the first page starts at spell 1", labels[1], "spell 1")
+eq("long: the legend stays on screen", labels[#labels - 1], LEGEND)
+eq("long: the key hint closes the panel", labels[#labels], HINT)
+local folded = false
+for _, l in ipairs(labels) do if l:match("more$") or l:match("above$") then folded = true end end
+eq("long: no '+N more' / 'N above' folding rows any more", folded, false)
 
-local shown = 0
-for _, l in ipairs(labels) do
-	if l ~= LEGEND and not l:match("^%.%.%. %+%d+ more$") then shown = shown + 1 end
+-- every content row can be reached, and the legend is on every page
+local reached, legend_always = {}, true
+local view = { scroll = 0 }
+for _ = 1, 200 do
+	labels = render(with_legend(content_rows(200)), 360, view)
+	for _, n in ipairs(spells_in(labels)) do reached[n] = true end
+	if labels[#labels - 1] ~= LEGEND then legend_always = false end
+	view.scroll = view.scroll + 5
 end
-eq("clamped: hidden count accounts for every content row", shown + hidden, 200)
-eq("clamped: rows drawn are a prefix (first content row kept)", labels[1], "spell 1")
-eq("clamped: '+N more' sits directly above the legend",
-	labels[#labels - 1]:match("^%.%.%. %+%d+ more$") ~= nil, true)
+local count = 0
+for _ in pairs(reached) do count = count + 1 end
+eq("long: every spell is reachable by scrolling", count, 200)
+eq("long: the legend is on every page", legend_always, true)
 
--- ---- 3. long structure with NO sticky row (pre-existing behaviour) ----------
---
--- Regression guard: the sticky branch must not perturb the plain tail-cut.
-
-labels = render(content_rows(200), 360)
-n_more, hidden = count_more(labels)
-eq("no-legend: exactly one '+N more' line", n_more, 1)
-eq("no-legend: '+N more' is last", labels[#labels]:match("^%.%.%. %+%d+ more$") ~= nil, true)
-
-shown = 0
-for _, l in ipairs(labels) do
-	if not l:match("^%.%.%. %+%d+ more$") then shown = shown + 1 end
-end
-eq("no-legend: hidden count accounts for every content row", shown + hidden, 200)
-
--- The legend is paid for out of the row budget, NOT added on top of it: the
--- clamped panel is the same height either way (it is clamped to the screen --
--- growing it would put a row off the bottom edge, which is the whole point of
--- the clamp). What the legend costs is one CONTENT row.
-local with_l = render(with_legend(content_rows(200)), 360)
-local without_l = render(content_rows(200), 360)
-eq("legend does not grow the clamped panel", #with_l, #without_l)
-
-local function content_shown(labels)
-	local n = 0
-	for _, l in ipairs(labels) do
-		if l ~= LEGEND and not l:match("^%.%.%. %+%d+ more$") then n = n + 1 end
-	end
-	return n
-end
+-- The legend is paid for out of the visible rows, not added on top: the panel is
+-- the same height either way (it is clamped to the screen).
+local with_l = render(with_legend(content_rows(200)), 360, { scroll = 0 })
+local without_l = render(content_rows(200), 360, { scroll = 0 })
+eq("legend does not grow the panel", #with_l, #without_l)
 eq("legend displaces exactly one content row",
-	content_shown(with_l), content_shown(without_l) - 1)
+	#spells_in(with_l), #spells_in(without_l) - 1)
 
--- ---- 4. two sticky footnotes both survive the clamp ------------------------
+-- ---- 3. two sticky footnotes both stay ------------------------------------------
 --
--- Track C's named "?" footnote and Track B's "[ ] = ..." legend are BOTH
--- sticky now (sim_rows can emit up to two trailing sticky rows). Both must
--- survive the "... +N more" cut, in order, and the count must still be over
--- the CONTENT rows only -- two sticky rows now cost two lines of the budget.
+-- Track C's named "?" footnote and Track B's "[ ] = ..." legend are BOTH sticky
+-- (sim_rows can emit up to two trailing sticky rows): both stay, in order, under
+-- the scrolling part.  The bracket legend is long enough that the per-label
+-- width budget can cut it with "...", so it is matched by its stable prefix.
 
 local function with_two_stickies(rows)
 	rows[#rows + 1] = { bars = {}, label = LEGEND, color = GREY, sticky = true }
@@ -170,24 +157,86 @@ local function with_two_stickies(rows)
 	return rows
 end
 
--- The bracket legend is long enough that draw_panel's per-label width budget
--- (fit_label) can truncate it with a trailing "..." -- unrelated to the row
--- CLAMP this test is about -- so these checks match it by its stable prefix
--- rather than requiring the exact untruncated string.
-labels = render(with_two_stickies(content_rows(200)), 360)
-n_more, hidden = count_more(labels)
-eq("two-sticky: exactly one '+N more' line", n_more, 1)
-eq("two-sticky: footnote survives the cut", labels[#labels - 1], LEGEND)
-eq("two-sticky: bracket legend survives the cut and stays last",
-	labels[#labels]:match("^%[ %]") ~= nil, true)
+labels = render(with_two_stickies(content_rows(200)), 360, { scroll = 0 })
+eq("two-sticky: footnote stays", labels[#labels - 2], LEGEND)
+eq("two-sticky: bracket legend stays, just above the hint",
+	labels[#labels - 1]:match("^%[ %]") ~= nil, true)
+eq("two-sticky: the hint is last", labels[#labels], HINT)
 
-shown = 0
-for _, l in ipairs(labels) do
-	if l ~= LEGEND and not l:match("^%[ %]") and not l:match("^%.%.%. %+%d+ more$") then
-		shown = shown + 1
+-- ---- 3b. size: fixed, comfortable, independent of the wand ----------------------
+
+do
+	local function box_for(right, scale, sw)
+		drawn = { texts = {} }
+		local anchor = { boxes = { { top = 48, right = right } }, sel = 1 }
+		T.draw_panel(nil, content_rows(3), TITLE, sw or 640, 360, anchor, scale or 0.6)
+		return drawn.box
 	end
+	local narrow, wide = box_for(100), box_for(600)
+	eq("size: the same width next to a small and a huge wand", narrow.w, wide.w)
+	eq("size: comfortably wide (at least 180 GUI)", narrow.w >= 180, true)
+	eq("size: never the whole screen", narrow.w <= 640 * 0.45 + 0.001, true)
+	eq("size: grows with the text size", box_for(100, 1.0).w >= box_for(100, 0.5).w, true)
+	eq("size: right-aligned to the screen edge",
+		math.abs((narrow.x + narrow.w) - (640 - 3 + 4)) < 1.5 or narrow.x + narrow.w <= 640, true)
+
+	-- the width does not move while scrolling or when rows change
+	local v = { scroll = 0 }
+	render(content_rows(200), 360, v)
+	local w1 = drawn.box.w
+	v.scroll = 40
+	render(content_rows(200), 360, v)
+	eq("size: the width does not jump while scrolling", drawn.box.w, w1)
 end
-eq("two-sticky: hidden count accounts for every content row", shown + hidden, 200)
+
+-- ---- 3c. hide / show ------------------------------------------------------------
+
+do
+	local anchor = { boxes = { { top = 48, right = 400 } }, sel = 1 }
+	local function draw(view)
+		drawn = { texts = {} }
+		T.draw_panel(nil, content_rows(3), TITLE, 640, 360, anchor, 1.0, view)
+		return drawn.texts
+	end
+	local view = { hidden = true }
+	local texts = draw(view)
+	eq("hidden: only the tab is drawn", #texts, 1)
+	eq("hidden: the tab names the panel and offers to show it",
+		texts[1].text, "[+] " .. TITLE)
+
+	view.mouse = { x = texts[1].x + 3, y = texts[1].y + 2, click = true }
+	draw(view)
+	eq("hidden: a click on the tab shows the panel again", view.hidden, false)
+
+	-- title click hides; the same click must not bring it straight back
+	view.mouse = nil
+	texts = draw(view)
+	local tx, ty
+	for _, t in ipairs(texts) do if t.text == TITLE then tx, ty = t.x, t.y end end
+	view.mouse = { x = tx + 3, y = ty + 2, click = true }
+	draw(view)
+	eq("title: a click on the title hides the panel", view.hidden, true)
+	view.mouse = nil
+	eq("title: ...and it stays hidden on the next frame", #draw(view), 1)
+end
+
+-- ---- 3d. the scroll bar -----------------------------------------------------------
+
+do
+	local view = { scroll = 0 }
+	render(content_rows(200), 360, view)
+	local box = drawn.box
+	-- a click near the bottom of the bar jumps most of the way down
+	local bar_x = box.x + box.w - 4 - 2 + 1
+	local line_h = 9 * 1.0 + 2
+	view.mouse = { x = bar_x, y = box.y + 4 + line_h + 2 + (box.h - 2 * line_h) * 0.9, click = true }
+	render(content_rows(200), 360, view)
+	eq("scroll bar: a click far down jumps down the structure", view.scroll > 100, true)
+	view.mouse = nil
+	local before = view.scroll
+	render(content_rows(200), 360, view)
+	eq("scroll bar: the position is kept between frames", view.scroll, before)
+end
 
 -- ---- 4b. new row kinds: re-casts, skipped cards, an engine that failed -------
 
@@ -421,25 +470,18 @@ do
 	local anchor = { boxes = { { top = 48, right = 400 } }, sel = 1 }
 
 	local function page(scroll)
-		local view = { scroll = scroll }
-		drawn = { texts = {} }
-		T.draw_panel(nil, content_rows(200), TITLE, 640, 360, anchor, 1.0, view)
-		local labels = {}
-		for _, t in ipairs(drawn.texts) do
-			if t.text ~= TITLE and t.text ~= "|" then labels[#labels + 1] = t.text end
-		end
-		return labels, view.scroll
+		local v = { scroll = scroll }
+		local got = render(content_rows(200), 360, v)
+		return got, v.scroll
 	end
 	eq("scroll: first page starts at spell 1", page(0)[1], "spell 1")
-	local mid = page(10)
-	eq("scroll: scrolled page starts with the 'above' row", mid[1], "^ 10 above")
-	eq("scroll: then spell 11", mid[2], "spell 11")
+	eq("scroll: scrolled page starts at spell 11", page(10)[1], "spell 11")
 	local bottom, clamped = page(10000)
 	eq("scroll: clamped to the last page", clamped < 10000, true)
 	local last_content
 	for _, l in ipairs(bottom) do if l:match("^spell %d+$") then last_content = l end end
 	eq("scroll: the last spell is reachable", last_content, "spell 200")
-	eq("scroll: the hint is shown", bottom[#bottom], "PgUp/PgDn: scroll")
+	eq("scroll: the hint is shown", bottom[#bottom], HINT)
 end
 
 -- ---- 7. hover tooltip and click-to-open for a row cut with "..." -------------
@@ -484,7 +526,7 @@ do
 	-- clicking an opened row closes it again
 	local ox, oy
 	for _, t in ipairs(opened) do
-		if t.text ~= TITLE then ox, oy = t.x, t.y; break end
+		if is_row(t) then ox, oy = t.x, t.y; break end
 	end
 	view.mouse = { x = ox + 5, y = oy + 2, click = true }
 	draw(view)

@@ -44,9 +44,10 @@ local M = {}
 local gui = nil
 
 -- Reading a structure too long for the screen: PageUp / PageDown scroll the
--- panel (SDL scancodes, which is what the game's Input API takes).  The panel's
--- gui is non-interactive on purpose, so the mouse wheel is not used.
-local KEY_PAGEUP, KEY_PAGEDOWN = 75, 78
+-- panel, Home hides / shows it (SDL scancodes, which is what the game's Input API
+-- takes).  The panel's gui is non-interactive on purpose, so the mouse wheel is
+-- not used; clicks come from the raw pointer.
+local KEY_PAGEUP, KEY_PAGEDOWN, KEY_HOME = 75, 78, 74
 local SCROLL_STEP = 5
 local panel_view = { scroll = 0 }
 
@@ -1294,20 +1295,28 @@ end
 
 -- The panel describes the HELD wand (= the selected box), so it stays put
 -- while the user rearranges that wand's spells and live-updates as the cast
--- order changes -- no popping like a hover tooltip would. It docks in the
--- free column right of the wand boxes, top-aligned with the selected wand's
--- own box when there's room, sliding down past wider boxes / up from the
--- screen bottom when there isn't (see placement below). Height is clamped
--- to the screen; overflow folds into one "... +N more" line. It never
--- covers a wand box, so the old z-order fight with the engine's spell
--- frames and our slot brackets can't happen. (No scroll container on
--- purpose: this gui is NonInteractive so hovering it can never block
--- firing or inventory clicks -- see the fire-block fix.)
+-- order changes -- no popping like a hover tooltip would.
+--
+-- SIZE.  A fixed, comfortable width that does not depend on the wand: a big wand
+-- has a wide box, and sizing the panel from what is left of the screen made it
+-- shrink exactly when a long structure needed room.  It may now overlap the
+-- wand box; hiding it (click its title, or Home) is how the slots are
+-- uncovered.  HEIGHT: a short structure pins at the selected wand's height, a
+-- long one takes the full column under the HP/mana bars, and a structure
+-- taller than that SCROLLS (PageUp / PageDown, or click the scroll bar) instead
+-- of being folded into a "+N more" line.
+--
+-- It never needs the mouse to be readable, and its gui is NonInteractive so
+-- hovering it can never block firing or inventory clicks (see the fire-block
+-- fix); clicks are read from the raw pointer instead.
 local RIGHT_MARGIN    = 3    -- GUI kept clear at the right screen edge
-local PANEL_GAP       = 6    -- GUI between the active wand's box edge and the panel
 local TOP_BAR_KEEPOUT = 58   -- panel top stays below the HP/mana/gold bars
 local BOTTOM_MARGIN   = 12   -- GUI kept clear at the screen bottom
-local MAX_PANEL_W     = 220  -- hard cap on panel width (also clamped to sw*0.5)
+local PANEL_W_BASE    = 260  -- GUI: the panel's width at the default 0.6 text scale
+local PANEL_W_MIN     = 180  -- never narrower than this, whatever the screen
+local PANEL_W_MAX_FRAC = 0.45 -- ...nor wider than this share of the screen
+local SCROLLBAR_W     = 2    -- GUI, the scroll bar's width
+local SCROLLBAR_GAP   = 3    -- GUI between the text column and the bar
 local PANEL_BG_Z      = -20  -- lower z = front; beats the slot brackets (z -10)
 local PANEL_TEXT_Z    = -21  -- one layer in front of the panel background
 -- Debug overlays (readout box, measure tool) must sit in FRONT of the cast panel
@@ -1452,22 +1461,26 @@ local function wrap_label(gui, text, scale, max_px)
 end
 
 -- Companion cast-structure panel for the held wand, drawn RIGHT-ANCHORED.
--- Overlap with other wands is acceptable (the panel is opaque and topmost), so
--- placement is simple: pin the right edge near the screen edge and grow the
--- panel leftward. Vertically it is HYBRID -- a short structure pins at the
--- selected wand's height (clamped below the HP bars); a long one that won't fit
--- there takes over the full-height right column under the bars (may cover the
--- Wet/Tinker status text, by design). Long labels are truncated to MAX_PANEL_W.
--- `opts` (optional) lets a long structure be READ rather than cut off:
+-- Overlap with wand boxes is acceptable (the panel is opaque and topmost, and
+-- can be hidden), so placement is simple: pin the right edge near the screen
+-- edge at a fixed width.  Vertically it is HYBRID -- a short structure pins at
+-- the selected wand's height (clamped below the HP bars); a long one that won't
+-- fit there takes over the full-height right column under the bars (may cover
+-- the Wet/Tinker status text, by design) and scrolls.  Rows wider than the
+-- panel are cut with "..." (hover for the full text, click to wrap them).
+-- `opts` (optional) is the panel's view state, owned by the caller so it survives
+-- from frame to frame:
+--   opts.hidden    true = draw only a small "show" tab.  Toggled here by a click
+--                on the title (or the tab); the caller toggles it for the Home key.
+--   opts.scroll    first visible content row, 0-based; clamped here and written
+--                back.  Only used when the structure does not fit.
 --   opts.expanded  { [label] = true } rows the reader opened by clicking them;
 --                wrapped in full.  Written by this function.
---   opts.mouse   { x, y, click } in GUI coordinates (nil = no pointer): a row cut
+--   opts.mouse     { x, y, click } in GUI coordinates (nil = no pointer): a row cut
 --                short with "..." shows its full text in a tooltip while hovered,
---                and a click opens / closes it.  The panel's gui stays
---                non-interactive, so this reads the raw pointer instead.
---   opts.scroll  first visible content row, 0-based; clamped here and written
---                back, so the caller keeps the position between frames.  A
---                non-nil value also turns on the "PgUp/PgDn" hint line.
+--                and a click opens / closes it; a click on the title hides the
+--                panel; a click on the scroll bar jumps there.  The panel's gui
+--                stays non-interactive, so this reads the raw pointer instead.
 local function draw_panel(gui, rows, title, sw, sh, anchor, scale, opts)
 	if #rows == 0 then return end
 	opts = opts or {}
@@ -1485,24 +1498,62 @@ local function draw_panel(gui, rows, title, sw, sh, anchor, scale, opts)
 	local _, th = text_dims(gui, title, scale)
 	local line_h = th + 2
 	local bar_w = (text_dims(gui, "| ", scale)) -- advance per nesting spine
+	local mouse = opts.mouse
+	local function over(x, y, w, h)
+		return mouse and mouse.x >= x and mouse.x <= x + w and mouse.y >= y and mouse.y < y + h
+	end
 
-	-- width budget: cap at MAX_PANEL_W (and half-screen), AND keep the panel's
-	-- LEFT edge clear of the active wand's box right edge so its spell slots stay
-	-- clickable (the panel right-anchors and grows leftward). Truncate labels past
-	-- the budget, then hug the widest KEPT label. The title is never truncated, so
-	-- the panel never collapses even if every label is over-long.
-	local sel_right = (anchor.sel and anchor.boxes[anchor.sel])
-		and anchor.boxes[anchor.sel].right or 0
-	local avail = sw - RIGHT_MARGIN - PANEL_GAP - sel_right
-	local max_panel_w = math.min(MAX_PANEL_W, sw * 0.5, avail)
-	if max_panel_w < 60 then max_panel_w = 60 end -- floor for a near-full-width active wand
+	-- ---- where the panel sits ------------------------------------------------
+	local screen_bot = sh - BOTTOM_MARGIN
+	local stack_top = anchor.boxes[1].top
+	for _, b in ipairs(anchor.boxes) do
+		if b.top < stack_top then stack_top = b.top end
+	end
+	local sel_top = (anchor.sel and anchor.boxes[anchor.sel])
+		and anchor.boxes[anchor.sel].top or stack_top
+	-- candidate top: the selected wand's box top, never above the stack top and
+	-- never over the HP/mana/gold bars.
+	local cand_top = math.floor(math.max(TOP_BAR_KEEPOUT, stack_top, sel_top))
+
+	-- Width: fixed, in proportion to the text size, so it neither hugs the
+	-- longest row (jumping as you scroll) nor shrinks next to a wide wand.
+	local panel_w = PANEL_W_BASE * scale / 0.6
+	panel_w = math.min(panel_w, sw * PANEL_W_MAX_FRAC)
+	panel_w = math.max(panel_w, PANEL_W_MIN)
+	panel_w = math.min(panel_w, sw - RIGHT_MARGIN - 8)
+	-- the box starts one pad left of the text column; right-aligned to the screen
+	local px = math.floor(sw - RIGHT_MARGIN - panel_w + pad)
+	local box_x = px - pad
+
+	-- ---- hidden: just a tab to bring it back ---------------------------------
+	if opts.hidden then
+		local tab = "[+] " .. title
+		local tab_w = (text_dims(gui, tab, scale)) + pad * 2
+		local tx = math.floor(sw - RIGHT_MARGIN - tab_w + pad)
+		if mouse and mouse.click and over(tx - pad, cand_top - pad, tab_w, line_h + pad * 2) then
+			opts.hidden = false
+			mouse.click = false
+		end
+		GuiZSet(gui, PANEL_BG_Z)
+		GuiImageNinePiece(gui, 90210, tx - pad, cand_top - pad, tab_w, line_h + pad * 2, 1.0)
+		GuiZSet(gui, PANEL_TEXT_Z)
+		GuiColorSetForNextWidget(gui, HEADER_COLOR[1], HEADER_COLOR[2], HEADER_COLOR[3], 1)
+		GuiText(gui, tx, cand_top, tab, scale)
+		GuiZSet(gui, 1)
+		return
+	end
+
+	-- ---- rows: wrap the ones the reader opened, cut the rest -----------------
+	-- The text column leaves room for the scroll bar, always, so toggling the bar
+	-- never reflows anything.
+	local label_budget = panel_w - pad * 2 - SCROLLBAR_W - SCROLLBAR_GAP
 	opts.expanded = opts.expanded or {}
 	do
 		local expanded = {}
 		for _, r in ipairs(rows) do
 			local open = opts.expanded[r.label]
 			local bars_w = (r.header and 0 or #r.bars) * bar_w
-			local lines = open and wrap_label(gui, r.label, scale, max_panel_w - pad * 2 - bars_w)
+			local lines = open and wrap_label(gui, r.label, scale, label_budget - bars_w)
 				or { r.label }
 			for _, text in ipairs(lines) do
 				local copy = {}
@@ -1515,107 +1566,91 @@ local function draw_panel(gui, rows, title, sw, sh, anchor, scale, opts)
 		end
 		rows = expanded
 	end
-	local max_w = (text_dims(gui, title, scale))
 	for _, r in ipairs(rows) do
 		local bars_w = (r.header and 0 or #r.bars) * bar_w
-		r.label = fit_label(gui, r.label, scale, max_panel_w - pad * 2 - bars_w)
+		r.label = fit_label(gui, r.label, scale, label_budget - bars_w)
 		r.cut = (r.label ~= r.full) and not r.opened
-		local w = bars_w + (text_dims(gui, r.label, scale))
-		if w > max_w then max_w = w end
 	end
-	local panel_w = max_w + pad * 2
 
-	-- vertical placement (hybrid) --------------------------------------------
-	local screen_bot = sh - BOTTOM_MARGIN
-	local function rows_at(y, bot)
-		return math.floor((bot - y - pad - 2 - line_h) / line_h)
+	-- ---- vertical placement and the scroll window ---------------------------
+	local function rows_at(y)
+		return math.floor((screen_bot - y - pad - 2 - line_h) / line_h)
 	end
-	local stack_top = anchor.boxes[1].top
-	for _, b in ipairs(anchor.boxes) do
-		if b.top < stack_top then stack_top = b.top end
-	end
-	local sel_top = (anchor.sel and anchor.boxes[anchor.sel])
-		and anchor.boxes[anchor.sel].top or stack_top
-	-- candidate top: the selected wand's box top, never above the stack top and
-	-- never over the HP/mana/gold bars.
-	local cand_top = math.floor(math.max(TOP_BAR_KEEPOUT, stack_top, sel_top))
 	local y0
-	if rows_at(cand_top, screen_bot) >= #rows then
+	if rows_at(cand_top) >= #rows then
 		y0 = cand_top                    -- short: pin at the wand's height
 	else
 		y0 = math.floor(TOP_BAR_KEEPOUT) -- long: take over the full-height column
 	end
-	local bot_limit = screen_bot
+	local max_rows = math.max(2, rows_at(y0))
 
-	-- right-align: right edge = sw - RIGHT_MARGIN, panel grows leftward
-	local px = math.floor(sw - RIGHT_MARGIN - panel_w)
-	if px < 4 then px = 4 end
+	-- Trailing sticky rows (the "?" footnotes, the bracket legend) stay put under
+	-- the scrolling part: they explain marks that are on screen above them.
+	local n_sticky = 0
+	while rows[#rows - n_sticky] and rows[#rows - n_sticky].sticky do n_sticky = n_sticky + 1 end
+	local content = #rows - n_sticky
 
-	-- clamp rows to the band: keep what fits, fold the rest into "... +N more"
-	local max_rows = math.floor((bot_limit - y0 - pad - 2 - line_h) / line_h)
-	if max_rows < 2 then max_rows = 2 end
-	if #rows > max_rows then
-		-- Every trailing sticky row (the "?" tier/mana footnotes, the bracket
-		-- legend) is held back from the cut and re-appended after it, in order:
-		-- dropping one while the marks/warnings it explains stay visible above
-		-- would leave them unexplained. They cost one line of the budget each,
-		-- so the "+N more" count is over the CONTENT rows only.
-		local n_sticky = 0
-		while rows[#rows - n_sticky] and rows[#rows - n_sticky].sticky do
-			n_sticky = n_sticky + 1
-		end
-		local hint = opts.scroll ~= nil
-		local budget = math.max(1, max_rows - n_sticky - (hint and 1 or 0))
-		local content = #rows - n_sticky
-		-- The window: with a row above and one below reserved, budget-2 content rows
-		-- show; the last page needs no "more" row, so it ends flush at `content`.
-		local scroll = math.floor(opts.scroll or 0)
-		local max_scroll = math.max(0, content - math.max(1, budget - 2))
-		scroll = math.max(0, math.min(scroll, max_scroll))
-		if opts.scroll ~= nil then opts.scroll = scroll end
+	local scrolls = #rows > max_rows
+	local visible, scroll = content, 0
+	if scrolls then
+		-- one line is kept for the key hint
+		visible = math.max(1, max_rows - n_sticky - 1)
+		local max_scroll = math.max(0, content - visible)
+		scroll = math.max(0, math.min(math.floor(opts.scroll or 0), max_scroll))
+	end
+	opts.scroll = scroll
 
-		local kept = {}
-		local first = scroll + 1
-		if scroll > 0 then
-			kept[#kept + 1] = { bars = {}, label = "^ " .. scroll .. " above",
-				color = HEADER_COLOR }
-		end
-		local room = budget - #kept
-		local last = first + room - 1
-		if last < content then
-			last = last - 1 -- keep a row for "... +N more"
-		else
-			last = content
-		end
-		for i = first, last do kept[#kept + 1] = rows[i] end
-		if last < content then
-			kept[#kept + 1] = { bars = {},
-				label = "... +" .. (content - last) .. " more", color = HEADER_COLOR }
-		end
-		for i = content + 1, #rows do kept[#kept + 1] = rows[i] end
-		if hint then
-			kept[#kept + 1] = { bars = {}, label = "PgUp/PgDn: scroll", color = COLOR.OTHER }
-		end
-		rows = kept
+	local shown = {}
+	for i = scroll + 1, scroll + visible do shown[#shown + 1] = rows[i] end
+	for i = content + 1, #rows do shown[#shown + 1] = rows[i] end
+	if scrolls then
+		shown[#shown + 1] = { bars = {}, label = "PgUp/PgDn: scroll   Home: hide",
+			color = COLOR.OTHER, hint = true }
+	end
+	local panel_h = (#shown + 1) * line_h + pad * 2
+
+	-- ---- clicks on the title (hide) and the scroll bar (jump) ---------------
+	local title_hit = over(box_x, y0 - pad, panel_w, line_h + pad)
+	if mouse and mouse.click and title_hit then
+		opts.hidden = true
+		mouse.click = false   -- consumed: the tab drawn next must not take the same click
 	end
 
-	local panel_h = (#rows + 1) * line_h + pad * 2
+	local bar_x = box_x + panel_w - pad - SCROLLBAR_W
+	local bar_y = y0 + line_h + 2
+	local bar_h = visible * line_h
+	if scrolls and mouse and mouse.click and over(bar_x - 2, bar_y, SCROLLBAR_W + 4, bar_h) then
+		local target = (mouse.y - bar_y) / bar_h * content - visible / 2
+		scroll = math.max(0, math.min(math.floor(target + 0.5), content - visible))
+		opts.scroll = scroll
+		shown = {}
+		for i = scroll + 1, scroll + visible do shown[#shown + 1] = rows[i] end
+		for i = content + 1, #rows do shown[#shown + 1] = rows[i] end
+		shown[#shown + 1] = { bars = {}, label = "PgUp/PgDn: scroll   Home: hide",
+			color = COLOR.OTHER, hint = true }
+	end
+	if opts.hidden then return draw_panel(gui, rows, title, sw, sh, anchor, scale, opts) end
 
+	-- ---- draw ----------------------------------------------------------------
 	-- opaque + topmost: lower z draws in front, so the panel sits over any wand
 	-- boxes/brackets it overlaps and stays readable.
 	GuiZSet(gui, PANEL_BG_Z)
-	GuiImageNinePiece(gui, 90210, px - pad, y0 - pad, panel_w, panel_h, 1.0)
+	GuiImageNinePiece(gui, 90210, box_x, y0 - pad, panel_w, panel_h, 1.0)
 
 	GuiZSet(gui, PANEL_TEXT_Z)
 	GuiText(gui, px, y0, title, scale)
+	local close = "[-]"
+	local close_w = (text_dims(gui, close, scale))
+	GuiColorSetForNextWidget(gui, HEADER_COLOR[1], HEADER_COLOR[2], HEADER_COLOR[3], 1)
+	GuiText(gui, box_x + panel_w - pad - SCROLLBAR_W - close_w, y0, close, scale)
+
 	local y = y0 + line_h + 2
-	local mouse, tooltip = opts.mouse, nil
-	for _, r in ipairs(rows) do
+	local tooltip
+	for _, r in ipairs(shown) do
 		local x = px
 		-- a row that was cut short (or that the reader opened) answers the pointer
 		if mouse and (r.cut or r.opened) and r.key
-			and mouse.x >= px - pad and mouse.x <= px - pad + panel_w
-			and mouse.y >= y and mouse.y < y + line_h then
+			and over(box_x, y, panel_w, line_h) and not over(bar_x - 2, y, SCROLLBAR_W + 4, line_h) then
 			if mouse.click then
 				opts.expanded[r.key] = (not opts.expanded[r.key]) or nil
 			elseif r.cut then
@@ -1632,6 +1667,14 @@ local function draw_panel(gui, rows, title, sw, sh, anchor, scale, opts)
 		GuiColorSetForNextWidget(gui, r.color[1], r.color[2], r.color[3], 1)
 		GuiText(gui, x, y, r.label, scale)
 		y = y + line_h
+	end
+
+	-- the scroll bar: a thin track and a thumb showing where the window is
+	if scrolls then
+		local thumb_h = math.max(4, bar_h * visible / content)
+		local thumb_y = bar_y + (bar_h - thumb_h) * scroll / math.max(1, content - visible)
+		line(gui, 90301, bar_x, bar_y, SCROLLBAR_W, bar_h, COLOR.OTHER, 0.25)
+		line(gui, 90302, bar_x, thumb_y, SCROLLBAR_W, thumb_h, HEADER_COLOR, 0.9)
 	end
 
 	-- the full text of the hovered row, next to the pointer, in front of everything
@@ -1933,6 +1976,7 @@ function M.update()
 			}
 			if key_pressed(KEY_PAGEDOWN) then panel_view.scroll = panel_view.scroll + SCROLL_STEP end
 			if key_pressed(KEY_PAGEUP) then panel_view.scroll = panel_view.scroll - SCROLL_STEP end
+			if key_pressed(KEY_HOME) then panel_view.hidden = not panel_view.hidden end
 			panel_view.mouse = read_pointer(sw, sh)
 			draw_panel(gui, sim_rows(wd.sim, wd.cfg, wd.always, wd.uncertain_ids),
 				title, sw, sh, anchor, panel_scale, panel_view)

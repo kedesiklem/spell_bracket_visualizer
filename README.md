@@ -16,7 +16,8 @@ Two views, both live while the inventory is open:
    `WRAPS! -> recharge` banner and wrapped-in cards are marked `~`. It pins to
    the selected wand's box when the structure is short and takes over the full
    right column when it isn't, drawing opaque and on top so it stays readable;
-   long structures clamp to the screen (`... +N more`) instead of overflowing.
+   long structures scroll instead of overflowing, and the whole panel can be
+   hidden down to a small tab (click its title, or press Home).
 2. **Slot brackets** (in the wand UI itself): `[ ]` bracket glyphs hugging
    each group's first and last card — SLIME rainbow parens, color cycling by
    nesting depth, no text labels (the card art already says what the group
@@ -95,10 +96,14 @@ All settings are runtime-scoped and apply immediately.
   font mod (e.g. Better Font) or a language with a smooth non-pixel font
   (Japanese, …) the game ignores the smaller sizes; the panel detects that and
   switches itself to **Large** automatically (see `docs/FONT_COMPAT.md`).
-- **Long rows in the panel** — a row too wide for the panel is cut with `...`:
-  hover it to read the full text in a tooltip, click it to open it in place
-  (click again to close). A structure taller than the screen scrolls with
-  **PageUp / PageDown**. (No setting: this is always on.)
+- **Panel size and reading** — the panel has a fixed, comfortable width that does
+  not depend on the wand next to it (it may overlap a big wand's box: hide it
+  to uncover the slots). Click the title (or press **Home**) to hide it down to
+  a `[+]` tab, click the tab to bring it back. A structure taller than the
+  screen scrolls with **PageUp / PageDown** or by clicking the scroll bar; the
+  `?` footnotes stay under the scrolling part. A row too wide for the panel is
+  cut with `...`: hover it to read the full text in a tooltip, click it to open
+  it in place (click again to close). (No setting: this is always on.)
 - **Slot Brackets** — the in-UI rainbow brackets (on by default).
 - **Slot Marks** — an underline under a modifier chain (the modifiers and the
   card they modify) and a red strike through cards that are drawn but never
@@ -138,7 +143,7 @@ files/wand_sprite_meta.lua      # generated wand sprite sizes (box layout)
 tools/test_support.lua          # shared loader / engine factory for the tests
 tools/test_wand_structure.lua   # expression-shape tests against the real engine
 tools/test_slot_delims.lua      # slot-bracket planner (nesting, casts, wrap)
-tools/test_panel_rows.lua       # panel row clamp (+N more fold, sticky legend)
+tools/test_panel_rows.lua       # panel layout (fixed width, hide/show, scroll, sticky legend)
 tools/test_slot_marks.lua       # underline / strike planning + drawing
 tools/test_font_compat.lua      # non-pixel-font layout checks
 tools/preview_wand.lua          # print any wand's brackets / tree, no game needed
@@ -165,8 +170,9 @@ workshop.xml                    # Steam Workshop manifest (name/desc/tags/exclud
    edge, wands with empty slots.
 5. `lua tools/test_slot_marks.lua` runs the underline / strike planner and its
    drawing against the real engine.
-6. `lua tools/test_panel_rows.lua` runs the real panel row clamp — the
-   `... +N more` fold and the sticky `?` legend that has to survive it.
+6. `lua tools/test_panel_rows.lua` runs the real panel layout — fixed width,
+   hide / show, scrolling with the scroll bar, and the sticky `?` legend that
+   has to stay under the scrolling part.
 7. `lua tools/test_font_compat.lua` validates the non-pixel-font fixes
    (`docs/FONT_COMPAT.md`) by driving the real panel layout with stubbed
    pixel-like / zero-measuring / nil-returning fonts, then prints the in-game
